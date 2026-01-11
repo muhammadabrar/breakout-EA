@@ -1,0 +1,19 @@
+{
+  "instrument": "us30",
+  "netProfit": 93828.15,
+  "balanceDrawdownAbsolute": 902.8,
+  "equityDrawdownAbsolute": 1002.8,
+  "balanceDrawdownMaximal": 4310.96,
+  "equityDrawdownMaximal": 4265.68,
+  "balanceDrawdownRelative": 4.89,
+  "equityDrawdownRelative": 4.84,
+  "totalTrades": 1952,
+  "profitableTrades": 1594,
+  "winRate": 81.66,
+  "lossRate": 18.34,
+  "maxConsecutiveWins": 29,
+  "maxConsecutiveLosses": 4,
+  "consecutiveWins": 6,
+  "consecutiveLosses": 1,
+  "strategy": "Daily + London"
+}

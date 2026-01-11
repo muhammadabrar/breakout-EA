@@ -1,0 +1,19 @@
+{
+  "instrument": "us30",
+  "netProfit": 33711.68,
+  "balanceDrawdownAbsolute": 1453.36,
+  "equityDrawdownAbsolute": 1694.56,
+  "balanceDrawdownMaximal": 2608.8,
+  "equityDrawdownMaximal": 2932.16,
+  "balanceDrawdownRelative": 3.09,
+  "equityDrawdownRelative": 3.73,
+  "totalTrades": 667,
+  "profitableTrades": 552,
+  "winRate": 82.76,
+  "lossRate": 17.24,
+  "maxConsecutiveWins": 21,
+  "maxConsecutiveLosses": 3,
+  "consecutiveWins": 6,
+  "consecutiveLosses": 1,
+  "strategy": "Daily"
+}

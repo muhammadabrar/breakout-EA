@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Breakout EA Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Breakout EA Dashboard</h1>
+            <p class="subtitle">Trading Performance Analysis</p>
+        </header>
+
+        <div class="filters">
+            <div class="filter-group">
+                <h3>Instruments</h3>
+                <label><input type="checkbox" value="us30" checked> US30</label>
+                <label><input type="checkbox" value="us100" checked> US100</label>
+                <label><input type="checkbox" value="xau" checked> XAU</label>
+            </div>
+            <div class="filter-group">
+                <h3>Strategies</h3>
+                <label><input type="checkbox" value="Daily" checked> Daily</label>
+                <label><input type="checkbox" value="Daily + London" checked> Daily + London</label>
+            </div>
+            <button id="applyFilters" class="btn btn-primary">Apply Filters</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="overview">Overview</button>
+            <button class="tab-btn" data-tab="monthly">Monthly Report</button>
+            <button class="tab-btn" data-tab="stats">Combined Stats</button>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Loading...
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Net Profit</h3>
+                    <p id="totalProfit" class="stat-value">$0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Total Trades</h3>
+                    <p id="totalTrades" class="stat-value">0</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Win Rate</h3>
+                    <p id="winRate" class="stat-value">0%</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Max Drawdown</h3>
+                    <p id="maxDrawdown" class="stat-value">$0</p>
+                </div>
+            </div>
+            <div class="table-container">
+                <h2>Reports Summary</h2>
+                <table id="reportsTable">
+                    <thead>
+                        <tr>
+                            <th>Instrument</th>
+                            <th>Strategy</th>
+                            <th>Net Profit</th>
+                            <th>Total Trades</th>
+                            <th>Win Rate</th>
+                            <th>Max Drawdown</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Monthly Report Tab -->
+        <div id="monthly" class="tab-content">
+            <div class="stats-grid" id="monthlyStats">
+                <!-- Stats will be populated here -->
+            </div>
+            <div class="chart-container">
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            <div class="table-container">
+                <h2>Monthly P&L - Combined All Instruments</h2>
+                <table id="monthlyTable">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Total P&L</th>
+                            <th>Total Trades</th>
+                            <th>Winning Trades</th>
+                            <th>Losing Trades</th>
+                            <th>Win Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody id="monthlyBody">
+                    </tbody>
+                </table>
+            </div>
+            <div class="calendar-grid-container">
+                <h2>Monthly Calendar View</h2>
+                <div id="calendarGrid" class="calendar-grid">
+                    <!-- Calendar items will be populated here -->
+                </div>
+            </div>
+            <div class="table-container" id="worstMonthsContainer" style="display: none;">
+                <h2>Most Losing Months by Instrument</h2>
+                <table id="worstMonthsTable">
+                    <thead>
+                        <tr>
+                            <th>Instrument</th>
+                            <th>Month</th>
+                            <th>Strategy</th>
+                            <th>P&L</th>
+                            <th>Trades</th>
+                        </tr>
+                    </thead>
+                    <tbody id="worstMonthsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Combined Stats Tab -->
+        <div id="stats" class="tab-content">
+            <div class="table-container">
+                <h2>Combined Statistics</h2>
+                <table id="statsTable">
+                    <thead>
+                        <tr>
+                            <th>Instrument</th>
+                            <th>Strategy</th>
+                            <th>Total Net Profit</th>
+                            <th>Total Trades</th>
+                            <th>Win Rate</th>
+                            <th>Max Drawdown</th>
+                        </tr>
+                    </thead>
+                    <tbody id="statsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,19 @@
+{
+  "instrument": "xau",
+  "netProfit": 146281.91,
+  "balanceDrawdownAbsolute": 3217.64,
+  "equityDrawdownAbsolute": 3167.42,
+  "balanceDrawdownMaximal": 9336.92,
+  "equityDrawdownMaximal": 9728.4,
+  "balanceDrawdownRelative": 11.48,
+  "equityDrawdownRelative": 11.66,
+  "totalTrades": 1822,
+  "profitableTrades": 1493,
+  "winRate": 81.94,
+  "lossRate": 18.06,
+  "maxConsecutiveWins": 29,
+  "maxConsecutiveLosses": 3,
+  "consecutiveWins": 5,
+  "consecutiveLosses": 1,
+  "strategy": "Daily + London"
+}

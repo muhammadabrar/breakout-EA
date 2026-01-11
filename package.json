@@ -1,0 +1,31 @@
+{
+  "name": "breakout-ea-data-uploader",
+  "version": "1.0.0",
+  "description": "Upload MT5 reports data to PostgreSQL database",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "upload": "node upload.js",
+    "setup-db": "node setup-db.js",
+    "queries": "node example-queries.js",
+    "server": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "mt5",
+    "trading",
+    "postgresql"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "csv-parse": "^5.5.2",
+    "dotenv": "^16.3.1",
+    "express": "^5.2.1",
+    "fs-extra": "^11.2.0",
+    "pg": "^8.11.3"
+  }
+}
