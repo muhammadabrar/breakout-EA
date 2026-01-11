@@ -324,6 +324,12 @@ double GetPipInPoints()
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
+   // Check if symbol is XAU/Gold (case insensitive)
+   bool isXAU = (StringFind(symbol, "XAU") >= 0 || 
+                 StringFind(symbol, "GOLD") >= 0 ||
+                 StringFind(symbol, "xau") >= 0 || 
+                 StringFind(symbol, "gold") >= 0);
+   
    // Check if symbol contains JPY (Japanese Yen pairs)
    bool isJPY = (StringFind(symbol, "JPY") >= 0);
    
@@ -335,7 +341,24 @@ double GetPipInPoints()
                    StringFind(symbol, "cash") >= 0 ||
                    StringFind(symbol, "CFD") >= 0);
    
-   if(isIndex)
+   if(isXAU)
+   {
+      // For XAU/Gold: 1 pip = 0.10 (10 cents) - this is the standard broker definition
+      // If point = 0.01, then 1 pip (0.10) = 10 points
+      // If point = 0.001, then 1 pip (0.10) = 100 points
+      if(point > 0)
+      {
+         double pipInPoints = 0.10 / point;  // 0.10 divided by point value
+         Print("XAU/Gold detected: ", symbol, " | Digits: ", digits, " | Point: ", point, " | PipInPoints: ", pipInPoints, " (1 pip = 0.10)");
+         return pipInPoints;
+      }
+      else
+      {
+         Print("Warning: Point value is 0 for XAU, using fallback");
+         return (digits == 3) ? 100.0 : 10.0; // Fallback: 100 points for 3 digits, 10 points for 2 digits
+      }
+   }
+   else if(isIndex)
    {
       // For indices: 1 pip = 1.0 (whole number)
       // Calculate how many points make 1.0
