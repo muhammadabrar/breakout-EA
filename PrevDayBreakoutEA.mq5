@@ -566,8 +566,6 @@ double GetPipInPoints()
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
-   double pipValue = GetPipValue();
-   
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if(position.SelectByIndex(i))
@@ -580,6 +578,11 @@ void ManageTrailingStops()
             // Get current market prices
             double bidPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
             double askPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            
+            // Calculate pip value for this symbol (recalculate to ensure accuracy)
+            double pipValue = GetPipValue();
+            double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+            double pipInPoints = GetPipInPoints();
             
             // Get position type from broker
             ENUM_POSITION_TYPE reportedType = position.Type();
@@ -619,14 +622,31 @@ void ManageTrailingStops()
             double currentPrice = bidPrice;  // Use BID for both position types
             
             // Calculate profit in pips
-            double profitPips;
+            // pipValue = price value of 1 pip (e.g., 0.10 for XAU, 1.0 for indices, 0.0001 for forex)
+            double priceDifference;
             if(posType == POSITION_TYPE_BUY)
             {
-               profitPips = (currentPrice - openPrice) / pipValue;
+               priceDifference = currentPrice - openPrice;
             }
             else // POSITION_TYPE_SELL
             {
-               profitPips = (openPrice - currentPrice) / pipValue;
+               priceDifference = openPrice - currentPrice;
+            }
+            
+            double profitPips = priceDifference / pipValue;
+            
+            // Debug: Log pip calculation details (only once per position to avoid spam)
+            static int lastDebugTicket = 0;
+            if(position.Ticket() != lastDebugTicket || MathAbs(profitPips - InpTrailingStart) < 2.0)
+            {
+               Print("Trailing Debug - Ticket: ", position.Ticket(),
+                     " | Price Diff: ", priceDifference,
+                     " | PipValue: ", pipValue,
+                     " | PipInPoints: ", pipInPoints,
+                     " | Point: ", point,
+                     " | Profit Pips: ", DoubleToString(profitPips, 2),
+                     " | Required: ", InpTrailingStart, " pips");
+               lastDebugTicket = position.Ticket();
             }
             
             // Check if profit reached trailing start
