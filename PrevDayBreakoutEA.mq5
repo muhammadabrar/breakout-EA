@@ -577,12 +577,11 @@ void ManageTrailingStops()
             double openPrice = position.PriceOpen();
             double currentSL = position.StopLoss();
             
-            // For trailing stops:
-            // BUY: track BID (sell price) - when BID goes up, profit increases, move SL up
-            // SELL: track ASK (buy back price) - when ASK goes down, profit increases, move SL down
-            double currentPrice = position.Type() == POSITION_TYPE_BUY ? 
-                                 SymbolInfoDouble(_Symbol, SYMBOL_BID) :
-                                 SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            // Industry-standard: Use BID for both BUY and SELL trailing calculations
+            // This avoids issues with ASK spread widening affecting SELL trailing stops
+            // BUY: track BID - when BID goes up, profit increases, move SL up
+            // SELL: track BID - when BID goes down, profit increases, move SL down
+            double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
             
             // Calculate profit in pips
             double profitPips = position.Type() == POSITION_TYPE_BUY ? 
@@ -596,9 +595,45 @@ void ManageTrailingStops()
                double trailingStep = InpTrailingStep * pipValue;
                
                // Calculate new stop loss level
-               double newSL = position.Type() == POSITION_TYPE_BUY ? 
-                             currentPrice - trailingDistance :  // BUY: SL below current price
-                             currentPrice + trailingDistance;   // SELL: SL above current price
+               double newSL;
+               if(position.Type() == POSITION_TYPE_BUY)
+               {
+                  // BUY: SL below current BID price
+                  newSL = currentPrice - trailingDistance;
+               }
+               else // SELL
+               {
+                  // SELL: SL above current BID price
+                  // As BID drops (favorable), newSL will be lower, moving SL down to lock profit
+                  newSL = currentPrice + trailingDistance;
+               }
+               
+               // Safety clamp: Prevent SL from being too close to market price
+               double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+               long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+               double minStop = stopsLevel * point;
+               
+               if(position.Type() == POSITION_TYPE_SELL)
+               {
+                  double askPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                  // For SELL: SL must be above ASK by at least minStop
+                  if(newSL <= askPrice + minStop)
+                  {
+                     Print("SELL trailing SL rejected: Too close to ASK. New SL: ", newSL, 
+                           " | ASK: ", askPrice, " | Min distance: ", minStop);
+                     continue; // Skip this position, try next one
+                  }
+               }
+               else // BUY
+               {
+                  // For BUY: SL must be below BID by at least minStop
+                  if(newSL >= currentPrice - minStop)
+                  {
+                     Print("BUY trailing SL rejected: Too close to BID. New SL: ", newSL, 
+                           " | BID: ", currentPrice, " | Min distance: ", minStop);
+                     continue; // Skip this position, try next one
+                  }
+               }
                
                // Only move SL if it's better by at least the step value
                bool shouldUpdate = false;
@@ -633,11 +668,10 @@ void ManageTrailingStops()
                                          position.TakeProfit()))
                   {
                      string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
-                     string priceType = position.Type() == POSITION_TYPE_BUY ? "BID" : "ASK";
                      Print("Trailing SL updated for ", posType, " position #", position.Ticket(), 
                            " | New SL: ", newSL, 
                            " | Old SL: ", currentSL,
-                           " | Current ", priceType, ": ", currentPrice, 
+                           " | Current BID: ", currentPrice, 
                            " | Profit: ", DoubleToString(profitPips, 1), " pips");
                   }
                   else
