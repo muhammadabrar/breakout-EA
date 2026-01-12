@@ -35,6 +35,12 @@ input int InpTrailingStart = 10;                   // Trailing Start (Pips)
 input int InpTrailingDistance = 10;                // Trailing Distance (Pips)
 input double InpTrailingStep = 0.5;                     // Trailing Step (Pips)
 
+input group "=== Trading Hours ==="
+input int InpStartHour = 1;                        // Trading Start Hour (0-23)
+input int InpStartMinute = 15;                     // Trading Start Minute (0-59)
+input int InpCloseHour = 22;                       // Trading Close Hour (0-23)
+input int InpCloseMinute = 0;                     // Trading Close Minute (0-59)
+
 input group "=== Chart Settings ==="
 input bool InpShowLines = true;                    // Show High/Low Lines
 input bool InpConfigureChart = true;               // Configure Chart Colors
@@ -51,6 +57,8 @@ double prevDayLow = 0;
 bool prevDayCalculated = false;
 bool ordersPlaced = false;
 int currentDate = 0;
+bool tradesClosedToday = false;
+double todayOpenPrice = 0;
 
 string lineHigh = "PrevDay_High";
 string lineLow = "PrevDay_Low";
@@ -112,9 +120,20 @@ void OnTick()
       currentDate = newDate;
       prevDayCalculated = false;
       ordersPlaced = false;
+      tradesClosedToday = false;
+      
+      // Get today's open price
+      GetTodayOpenPrice();
       
       // Delete old pending orders
       DeletePendingOrders();
+   }
+   
+   // Check if it's time to close all trades
+   if(!tradesClosedToday && IsCloseTime())
+   {
+      CloseAllTrades();
+      tradesClosedToday = true;
    }
    
    // Calculate previous day high/low
@@ -123,8 +142,8 @@ void OnTick()
       CalculatePreviousDayHighLow();
    }
    
-   // Place orders if ready
-   if(prevDayCalculated && !ordersPlaced)
+   // Place orders if ready and trading hours allow
+   if(prevDayCalculated && !ordersPlaced && IsTradingStartTime())
    {
       PlaceOrders();
       ordersPlaced = true;
@@ -230,6 +249,105 @@ void CalculatePreviousDayHighLow()
 }
 
 //+------------------------------------------------------------------+
+//| Get today's open price                                            |
+//+------------------------------------------------------------------+
+void GetTodayOpenPrice()
+{
+   double open[];
+   ArraySetAsSeries(open, true);
+   
+   // Get today's open from daily chart
+   int copied = CopyOpen(_Symbol, PERIOD_D1, 0, 1, open);
+   if(copied > 0)
+   {
+      todayOpenPrice = open[0];
+      Print("Today's open price: ", todayOpenPrice);
+   }
+   else
+   {
+      // Fallback: use current price if daily data not available
+      todayOpenPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      Print("Warning: Could not get today's open, using current price: ", todayOpenPrice);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Check if current time is after trading start time                |
+//+------------------------------------------------------------------+
+bool IsTradingStartTime()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   int currentMinutes = timeStruct.hour * 60 + timeStruct.min;
+   int startMinutes = InpStartHour * 60 + InpStartMinute;
+   
+   return (currentMinutes >= startMinutes);
+}
+
+//+------------------------------------------------------------------+
+//| Check if current time is at or after close time                  |
+//+------------------------------------------------------------------+
+bool IsCloseTime()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   int currentMinutes = timeStruct.hour * 60 + timeStruct.min;
+   int closeMinutes = InpCloseHour * 60 + InpCloseMinute;
+   
+   return (currentMinutes >= closeMinutes);
+}
+
+//+------------------------------------------------------------------+
+//| Close all positions and pending orders                           |
+//+------------------------------------------------------------------+
+void CloseAllTrades()
+{
+   Print("=== Closing all trades at close time ===");
+   
+   // Close all open positions
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(position.SelectByIndex(i))
+      {
+         if(position.Symbol() == _Symbol && position.Magic() == InpMagicNumber)
+         {
+            if(trade.PositionClose(position.Ticket()))
+            {
+               Print("Position closed: ", position.Ticket());
+            }
+            else
+            {
+               Print("Failed to close position: ", position.Ticket(), " Error: ", GetLastError());
+            }
+         }
+      }
+   }
+   
+   // Delete all pending orders
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(order.SelectByIndex(i))
+      {
+         if(order.Symbol() == _Symbol && order.Magic() == InpMagicNumber)
+         {
+            if(trade.OrderDelete(order.Ticket()))
+            {
+               Print("Pending order deleted: ", order.Ticket());
+            }
+            else
+            {
+               Print("Failed to delete pending order: ", order.Ticket(), " Error: ", GetLastError());
+            }
+         }
+      }
+   }
+   
+   Print("All trades closed/deleted");
+}
+
+//+------------------------------------------------------------------+
 //| Place pending orders                                              |
 //+------------------------------------------------------------------+
 void PlaceOrders()
@@ -260,48 +378,64 @@ void PlaceOrders()
    Print("SL Pips: ", InpStopLossPips, " | SL Distance: ", slDistance);
    Print("TP Pips: ", InpTakeProfitPips, " | TP Distance: ", tpDistance);
    
-   // Buy Stop above high
-   double buyPrice = NormalizeDouble(prevDayHigh, _Digits);
-   double buySL = NormalizeDouble(buyPrice - slDistance, _Digits);
-   double buyTP = NormalizeDouble(buyPrice + tpDistance, _Digits);
-   
-   // Validate SL/TP are correct distance from entry
-   if(buySL > 0 && buyTP > 0 && buySL < buyPrice && buyTP > buyPrice)
+   // Check if today's open is above previous day high - if so, skip buy trade
+   if(todayOpenPrice > prevDayHigh)
    {
-      if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, InpOrderComment))
-      {
-         Print("Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
-      }
-      else
-      {
-         Print("Failed to place Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
-      }
+      Print("Buy trade skipped: Today's open (", todayOpenPrice, ") is above previous day high (", prevDayHigh, ")");
    }
    else
    {
-      Print("Invalid Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
-   }
-   
-   // Sell Stop below low
-   double sellPrice = NormalizeDouble(prevDayLow, _Digits);
-   double sellSL = NormalizeDouble(sellPrice + slDistance, _Digits);
-   double sellTP = NormalizeDouble(sellPrice - tpDistance, _Digits);
-   
-   // Validate SL/TP are correct distance from entry
-   if(sellSL > 0 && sellTP > 0 && sellSL > sellPrice && sellTP < sellPrice)
-   {
-      if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, InpOrderComment))
+      // Buy Stop above high
+      double buyPrice = NormalizeDouble(prevDayHigh, _Digits);
+      double buySL = NormalizeDouble(buyPrice - slDistance, _Digits);
+      double buyTP = NormalizeDouble(buyPrice + tpDistance, _Digits);
+      
+      // Validate SL/TP are correct distance from entry
+      if(buySL > 0 && buyTP > 0 && buySL < buyPrice && buyTP > buyPrice)
       {
-         Print("Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
+         if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, InpOrderComment))
+         {
+            Print("Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
+         }
+         else
+         {
+            Print("Failed to place Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+         }
       }
       else
       {
-         Print("Failed to place Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+         Print("Invalid Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
       }
+   }
+   
+   // Check if today's open is below previous day low - if so, skip sell trade
+   if(todayOpenPrice < prevDayLow)
+   {
+      Print("Sell trade skipped: Today's open (", todayOpenPrice, ") is below previous day low (", prevDayLow, ")");
    }
    else
    {
-      Print("Invalid Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
+      // Sell Stop below low
+      double sellPrice = NormalizeDouble(prevDayLow, _Digits);
+      double sellSL = NormalizeDouble(sellPrice + slDistance, _Digits);
+      double sellTP = NormalizeDouble(sellPrice - tpDistance, _Digits);
+      
+      // Validate SL/TP are correct distance from entry
+      if(sellSL > 0 && sellTP > 0 && sellSL > sellPrice && sellTP < sellPrice)
+      {
+         if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, InpOrderComment))
+         {
+            Print("Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
+         }
+         else
+         {
+            Print("Failed to place Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+         }
+      }
+      else
+      {
+         Print("Invalid Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
+      }
    }
 }
 
@@ -499,12 +633,31 @@ void DrawPrevDayLines()
 //+------------------------------------------------------------------+
 void UpdateChartComment()
 {
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   int currentMinutes = timeStruct.hour * 60 + timeStruct.min;
+   int startMinutes = InpStartHour * 60 + InpStartMinute;
+   int closeMinutes = InpCloseHour * 60 + InpCloseMinute;
+   
    string comment = "\n";
    comment += "===== Previous Day Breakout EA =====\n";
    comment += "Previous Day High: " + DoubleToString(prevDayHigh, _Digits) + "\n";
    comment += "Previous Day Low: " + DoubleToString(prevDayLow, _Digits) + "\n";
+   comment += "Today's Open: " + DoubleToString(todayOpenPrice, _Digits) + "\n";
    comment += "Calculated: " + (prevDayCalculated ? "Yes" : "No") + "\n";
    comment += "Orders Placed: " + (ordersPlaced ? "Yes" : "No") + "\n";
+   comment += "Trading Hours: " + IntegerToString(InpStartHour) + ":" + 
+              StringFormat("%02d", InpStartMinute) + " - " + 
+              IntegerToString(InpCloseHour) + ":" + 
+              StringFormat("%02d", InpCloseMinute) + "\n";
+   comment += "Current Time: " + IntegerToString(timeStruct.hour) + ":" + 
+              StringFormat("%02d", timeStruct.min) + " | ";
+   if(currentMinutes < startMinutes)
+      comment += "Waiting for start time\n";
+   else if(currentMinutes >= closeMinutes)
+      comment += "Trading closed\n";
+   else
+      comment += "Trading active\n";
    comment += "SL: " + IntegerToString(InpStopLossPips) + " pips | TP: " + 
               IntegerToString(InpTakeProfitPips) + " pips\n";
    
