@@ -185,9 +185,9 @@ void ConfigureChartColors()
    // Remove grid
    ChartSetInteger(0, CHART_SHOW_GRID, false);
    
-   // Set background color to gray
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND, C'40,40,40');  // Dark gray
-   ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrWhite);
+   // Set background color to white
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);  // White background
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
    
    // Set candle colors - yellowish for bullish, blackish for bearish
    ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, C'255,235,59');   // Yellowish
@@ -200,8 +200,8 @@ void ConfigureChartColors()
    ChartSetInteger(0, CHART_COLOR_VOLUME, C'100,100,100');       // Gray for volume
    
    // Set chart line colors
-   ChartSetInteger(0, CHART_COLOR_GRID, C'60,60,60');           // Gray grid (if enabled)
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND, C'40,40,40');     // Dark gray background
+   ChartSetInteger(0, CHART_COLOR_GRID, C'200,200,200');       // Light gray grid (if enabled)
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);        // White background
    
    ChartRedraw();
 }
@@ -618,7 +618,7 @@ void ManageTrailingStops()
                   if(trade.PositionModify(position.Ticket(), 
                                          NormalizeDouble(newSL, _Digits), 
                                          position.TakeProfit()))
-                  
+                  {
                      string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
                      Print("Trailing SL updated for ", posType, " position: ", newSL, 
                            " | Current Price: ", currentPrice, 
