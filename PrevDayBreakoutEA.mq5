@@ -581,8 +581,41 @@ void ManageTrailingStops()
             double bidPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
             double askPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
             
-            // Get position type - use BID for both BUY and SELL (industry standard)
-            ENUM_POSITION_TYPE posType = position.Type();
+            // Get position type from broker
+            ENUM_POSITION_TYPE reportedType = position.Type();
+            
+            // Additional verification: Check if open price vs current price makes sense
+            // For BUY: openPrice < currentPrice (if profitable)
+            // For SELL: openPrice > currentPrice (if profitable)
+            bool isLikelyBuy = (openPrice < bidPrice);
+            bool isLikelySell = (openPrice > bidPrice);
+            
+            // Use price relationship to determine actual position type
+            // This is a workaround for cases where position.Type() returns incorrect value
+            ENUM_POSITION_TYPE posType;
+            if(isLikelyBuy && !isLikelySell)
+            {
+               posType = POSITION_TYPE_BUY;
+            }
+            else if(isLikelySell && !isLikelyBuy)
+            {
+               posType = POSITION_TYPE_SELL;
+            }
+            else
+            {
+               // If unclear, use reported type
+               posType = reportedType;
+            }
+            
+            // Log if there's a mismatch
+            if(reportedType != posType)
+            {
+               Print("WARNING: Position type corrected! Ticket: ", position.Ticket(),
+                     " | Reported Type: ", (reportedType == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+                     " | Corrected Type: ", (posType == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+                     " | Open Price: ", openPrice, " | BID: ", bidPrice);
+            }
+            
             double currentPrice = bidPrice;  // Use BID for both position types
             
             // Calculate profit in pips
