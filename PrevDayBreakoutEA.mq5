@@ -536,7 +536,7 @@ double GetPipInPoints()
       if(point > 0)
       {
          double pipInPoints = 1.0 / point;
-         Print("Index detected: ", symbol, " | Point: ", point, " | PipInPoints: ", pipInPoints);
+
          return pipInPoints;
       }
       else
@@ -560,9 +560,8 @@ double GetPipInPoints()
       return (digits == 5) ? 10.0 : 1.0;
    }
 }
-
 //+------------------------------------------------------------------+
-//| Manage trailing stops                                            |
+//| Manage trailing stops                  |
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
@@ -577,11 +576,16 @@ void ManageTrailingStops()
             double openPrice = position.PriceOpen();
             double currentSL = position.StopLoss();
             
-            // Industry-standard: Use BID for both BUY and SELL trailing calculations
-            // This avoids issues with ASK spread widening affecting SELL trailing stops
-            // BUY: track BID - when BID goes up, profit increases, move SL up
-            // SELL: track BID - when BID goes down, profit increases, move SL down
-            double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            // Get current market prices
+            double bidPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double askPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            
+            // Use appropriate price for each position type
+            double currentPrice;
+            if(position.Type() == POSITION_TYPE_BUY)
+               currentPrice = bidPrice;  // BUY uses BID for profit calculation
+            else
+               currentPrice = bidPrice;  // SELL also uses BID (industry standard)
             
             // Calculate profit in pips
             double profitPips = position.Type() == POSITION_TYPE_BUY ? 
@@ -599,89 +603,111 @@ void ManageTrailingStops()
                if(position.Type() == POSITION_TYPE_BUY)
                {
                   // BUY: SL below current BID price
-                  newSL = currentPrice - trailingDistance;
+                  newSL = bidPrice - trailingDistance;
                }
                else // SELL
                {
                   // SELL: SL above current BID price
-                  // As BID drops (favorable), newSL will be lower, moving SL down to lock profit
-                  newSL = currentPrice + trailingDistance;
+                  newSL = bidPrice + trailingDistance;
                }
                
-               // Safety clamp: Prevent SL from being too close to market price
+               // Get minimum stop distance
                double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
                long stopsLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
                double minStop = stopsLevel * point;
                
-               if(position.Type() == POSITION_TYPE_SELL)
-               {
-                  double askPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-                  // For SELL: SL must be above ASK by at least minStop
-                  if(newSL <= askPrice + minStop)
-                  {
-                     Print("SELL trailing SL rejected: Too close to ASK. New SL: ", newSL, 
-                           " | ASK: ", askPrice, " | Min distance: ", minStop);
-                     continue; // Skip this position, try next one
-                  }
-               }
-               else // BUY
+               // Safety check: Ensure SL respects minimum distance
+               if(position.Type() == POSITION_TYPE_BUY)
                {
                   // For BUY: SL must be below BID by at least minStop
-                  if(newSL >= currentPrice - minStop)
+                  if(newSL >= bidPrice - minStop)
                   {
-                     Print("BUY trailing SL rejected: Too close to BID. New SL: ", newSL, 
-                           " | BID: ", currentPrice, " | Min distance: ", minStop);
-                     continue; // Skip this position, try next one
+                     Print("BUY trailing SL too close to market. New SL: ", newSL, 
+                           " | BID: ", bidPrice, " | Min distance: ", minStop);
+                     continue;
+                  }
+               }
+               else // SELL
+               {
+                  // For SELL: SL must be above ASK by at least minStop
+                  // Important: Use ASK here because broker will use ASK to trigger SELL SL
+                  if(newSL <= askPrice + minStop)
+                  {
+                     Print("SELL trailing SL too close to market. New SL: ", newSL, 
+                           " | ASK: ", askPrice, " | Min distance: ", minStop,
+                           " | Required: ", askPrice + minStop);
+                     continue;
                   }
                }
                
-               // Only move SL if it's better by at least the step value
+               // Determine if we should update the SL
                bool shouldUpdate = false;
                
                if(position.Type() == POSITION_TYPE_BUY)
                {
-                  // For BUY: newSL should be higher (better) than currentSL
+                  // For BUY: Move SL up (higher is better)
                   if(currentSL == 0 || newSL > currentSL + trailingStep)
                      shouldUpdate = true;
                }
-               else
+               else // SELL
                {
-                  // For SELL: newSL should be lower (better/closer to price) than currentSL
-                  // Since SL is above entry for SELL, lower SL = better (locks in more profit)
-                  // Only update if newSL is at least trailingStep LOWER than currentSL
+                  // For SELL: Move SL down (lower is better, locks more profit)
+                  // currentSL is above entry, newSL should be lower than currentSL
                   if(currentSL == 0)
                   {
-                     // No SL set yet, set it
-                     shouldUpdate = true;
+                     shouldUpdate = true; // First time setting trailing SL
                   }
                   else if(newSL < currentSL - trailingStep)
                   {
-                     // New SL is better (lower) by at least trailingStep
+                     // newSL is at least trailingStep lower (better) than current
+                     shouldUpdate = true;
+                  }
+                  else if(currentSL > newSL && (currentSL - newSL) >= trailingStep)
+                  {
+                     // Alternative check: difference is at least the step
                      shouldUpdate = true;
                   }
                }
                
                if(shouldUpdate)
                {
-                  if(trade.PositionModify(position.Ticket(), 
-                                         NormalizeDouble(newSL, _Digits), 
-                                         position.TakeProfit()))
+                  double normalizedSL = NormalizeDouble(newSL, _Digits);
+                  
+                  if(trade.PositionModify(position.Ticket(), normalizedSL, position.TakeProfit()))
                   {
                      string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
-                     Print("Trailing SL updated for ", posType, " position #", position.Ticket(), 
-                           " | New SL: ", newSL, 
+                     Print("✓ Trailing SL updated for ", posType, " #", position.Ticket(), 
+                           " | New SL: ", normalizedSL, 
                            " | Old SL: ", currentSL,
-                           " | Current BID: ", currentPrice, 
+                           " | BID: ", bidPrice,
+                           " | ASK: ", askPrice,
                            " | Profit: ", DoubleToString(profitPips, 1), " pips");
                   }
                   else
                   {
                      string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
-                     Print("Failed to update trailing SL for ", posType, " position #", position.Ticket(), 
+                     Print("✗ Failed to update trailing SL for ", posType, " #", position.Ticket(), 
                            " | Error: ", GetLastError(), 
                            " | Code: ", trade.ResultRetcode(),
+                           " | Description: ", trade.ResultRetcodeDescription(),
+                           " | New SL: ", normalizedSL,
+                           " | Current SL: ", currentSL,
+                           " | BID: ", bidPrice,
+                           " | ASK: ", askPrice);
+                  }
+               }
+               else
+               {
+                  // Debug: Why wasn't it updated?
+                  if(profitPips >= InpTrailingStart)
+                  {
+                     string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
+                     Print("Trailing SL not updated for ", posType, " #", position.Ticket(),
+                           " | Current SL: ", currentSL,
                            " | New SL: ", newSL,
-                           " | Current SL: ", currentSL);
+                           " | Difference: ", MathAbs(currentSL - newSL),
+                           " | Required step: ", trailingStep,
+                           " | Profit: ", DoubleToString(profitPips, 1), " pips");
                   }
                }
             }
