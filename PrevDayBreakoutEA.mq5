@@ -576,9 +576,11 @@ void ManageTrailingStops()
          {
             double openPrice = position.PriceOpen();
             double currentSL = position.StopLoss();
-            double currentPrice = position.Type() == POSITION_TYPE_BUY ? 
-                                  SymbolInfoDouble(_Symbol, SYMBOL_BID) :
-                                  SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            
+            // For trailing stops, use BID for both BUY and SELL positions
+            // BUY: track BID (sell price) - when it goes up, profit increases
+            // SELL: track BID (buy back price) - when it goes down, profit increases
+            double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
             
             double profitPips = position.Type() == POSITION_TYPE_BUY ? 
                                (currentPrice - openPrice) / pipValue :
@@ -599,11 +601,14 @@ void ManageTrailingStops()
                
                if(position.Type() == POSITION_TYPE_BUY)
                {
+                  // For BUY: newSL should be higher (better) than currentSL
                   if(currentSL == 0 || newSL > currentSL + trailingStep)
                      shouldUpdate = true;
                }
                else
                {
+                  // For SELL: newSL should be lower (better/closer to price) than currentSL
+                  // Since SL is above entry for SELL, lower SL = better
                   if(currentSL == 0 || newSL < currentSL - trailingStep)
                      shouldUpdate = true;
                }
@@ -613,8 +618,16 @@ void ManageTrailingStops()
                   if(trade.PositionModify(position.Ticket(), 
                                          NormalizeDouble(newSL, _Digits), 
                                          position.TakeProfit()))
+                  
+                     string posType = position.Type() == POSITION_TYPE_BUY ? "BUY" : "SELL";
+                     Print("Trailing SL updated for ", posType, " position: ", newSL, 
+                           " | Current Price: ", currentPrice, 
+                           " | Profit: ", DoubleToString(profitPips, 1), " pips");
+                  }
+                  else
                   {
-                     Print("Trailing SL updated to ", newSL, " (Profit: ", DoubleToString(profitPips, 1), " pips)");
+                     Print("Failed to update trailing SL. Error: ", GetLastError(), 
+                           " | Code: ", trade.ResultRetcode());
                   }
                }
             }
