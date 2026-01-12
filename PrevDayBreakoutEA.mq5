@@ -561,7 +561,8 @@ double GetPipInPoints()
    }
 }
 //+------------------------------------------------------------------+
-//| Manage trailing stops                  |
+//| Manage trailing stops                  | 2026.01.12 17:51:57.755	2023.03.07 17:01:16   Trailing SL not updated for BUY #3 | Current SL: 33395.3 | New SL: 33336.41 | Difference: 58.88999999999942 | Required step: 0.5 | Profit: 11.7 pips
+
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
