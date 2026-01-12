@@ -129,28 +129,48 @@ void OnTick()
       DeletePendingOrders();
    }
    
-   // Check if it's time to close all trades
+   // Check if it's a weekend - if so, close all trades and don't trade
+   if(!IsWeekday())
+   {
+      if(!tradesClosedToday)
+      {
+         CloseAllTrades();
+         tradesClosedToday = true;
+         Print("Weekend detected - all trades closed. Trading disabled until Monday.");
+      }
+      UpdateChartComment();
+      return; // Exit early on weekends
+   }
+   
+   // Check if it's time to close all trades (Friday 22:00 or any day at close time)
    if(!tradesClosedToday && IsCloseTime())
    {
       CloseAllTrades();
       tradesClosedToday = true;
+      
+      MqlDateTime timeStruct;
+      TimeToStruct(TimeCurrent(), timeStruct);
+      if(timeStruct.day_of_week == 5) // Friday
+      {
+         Print("Friday 22:00 - All trades closed. Trading will resume Monday 1:15.");
+      }
    }
    
-   // Calculate previous day high/low
+   // Calculate previous day high/low (only on weekdays)
    if(!prevDayCalculated)
    {
       CalculatePreviousDayHighLow();
    }
    
-   // Place orders if ready and trading hours allow
+   // Place orders if ready and trading hours allow (only on weekdays)
    if(prevDayCalculated && !ordersPlaced && IsTradingStartTime())
    {
       PlaceOrders();
       ordersPlaced = true;
    }
    
-   // Manage trailing stops
-   if(InpTrailingMode != TSL_OFF)
+   // Manage trailing stops (only on weekdays and during trading hours)
+   if(IsWeekday() && InpTrailingMode != TSL_OFF)
       ManageTrailingStops();
    
    // Update chart comment
@@ -272,10 +292,27 @@ void GetTodayOpenPrice()
 }
 
 //+------------------------------------------------------------------+
+//| Check if current day is a weekday (Monday-Friday)                |
+//+------------------------------------------------------------------+
+bool IsWeekday()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   // day_of_week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+   // Return true for Monday (1) through Friday (5)
+   return (timeStruct.day_of_week >= 1 && timeStruct.day_of_week <= 5);
+}
+
+//+------------------------------------------------------------------+
 //| Check if current time is after trading start time                |
 //+------------------------------------------------------------------+
 bool IsTradingStartTime()
 {
+   // First check if it's a weekday
+   if(!IsWeekday())
+      return false;
+   
    MqlDateTime timeStruct;
    TimeToStruct(TimeCurrent(), timeStruct);
    
@@ -639,23 +676,38 @@ void UpdateChartComment()
    int startMinutes = InpStartHour * 60 + InpStartMinute;
    int closeMinutes = InpCloseHour * 60 + InpCloseMinute;
    
+   // Get day name
+   string dayNames[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+   string currentDay = dayNames[timeStruct.day_of_week];
+   bool isWeekday = IsWeekday();
+   
    string comment = "\n";
    comment += "===== Previous Day Breakout EA =====\n";
+   comment += "Day: " + currentDay + (isWeekday ? " (Weekday)" : " (Weekend)") + "\n";
    comment += "Previous Day High: " + DoubleToString(prevDayHigh, _Digits) + "\n";
    comment += "Previous Day Low: " + DoubleToString(prevDayLow, _Digits) + "\n";
    comment += "Today's Open: " + DoubleToString(todayOpenPrice, _Digits) + "\n";
    comment += "Calculated: " + (prevDayCalculated ? "Yes" : "No") + "\n";
    comment += "Orders Placed: " + (ordersPlaced ? "Yes" : "No") + "\n";
+   comment += "Trading Days: Monday - Friday\n";
    comment += "Trading Hours: " + IntegerToString(InpStartHour) + ":" + 
               StringFormat("%02d", InpStartMinute) + " - " + 
               IntegerToString(InpCloseHour) + ":" + 
               StringFormat("%02d", InpCloseMinute) + "\n";
    comment += "Current Time: " + IntegerToString(timeStruct.hour) + ":" + 
               StringFormat("%02d", timeStruct.min) + " | ";
-   if(currentMinutes < startMinutes)
+   
+   if(!isWeekday)
+      comment += "Weekend - Trading disabled\n";
+   else if(currentMinutes < startMinutes)
       comment += "Waiting for start time\n";
    else if(currentMinutes >= closeMinutes)
-      comment += "Trading closed\n";
+   {
+      if(timeStruct.day_of_week == 5) // Friday
+         comment += "Friday close - Trading resumes Monday 1:15\n";
+      else
+         comment += "Trading closed\n";
+   }
    else
       comment += "Trading active\n";
    comment += "SL: " + IntegerToString(InpStopLossPips) + " pips | TP: " + 
