@@ -35,6 +35,37 @@ function detectInstrumentAndStrategy(dirName) {
   return { instrument, strategy };
 }
 
+// Detect EA name from directory name or file content
+function detectEAName(dirName, htmlPath = null) {
+  const dirNameLower = dirName.toLowerCase();
+  
+  // Check directory name for EA indicators
+  if (dirNameLower.includes('cyberspace') || dirNameLower.includes('cyber')) {
+    return 'Cyberspace EA';
+  }
+  if (dirNameLower.includes('breakout')) {
+    return 'Breakout EA by currency pro';
+  }
+  
+  // If HTML path provided, try to detect from file content
+  if (htmlPath) {
+    try {
+      const htmlContent = fs.readFileSync(htmlPath, 'utf-8');
+      if (htmlContent.toLowerCase().includes('cyberspace') || htmlContent.toLowerCase().includes('cyber')) {
+        return 'Cyberspace EA';
+      }
+      if (htmlContent.toLowerCase().includes('breakout')) {
+        return 'Breakout EA by currency pro';
+      }
+    } catch (error) {
+      // If can't read file, continue with default
+    }
+  }
+  
+  // Default to Breakout EA
+  return 'Breakout EA by currency pro';
+}
+
 async function processDirectory(dirPath) {
   const dirName = path.basename(dirPath);
   const { instrument, strategy } = detectInstrumentAndStrategy(dirName);
@@ -57,12 +88,17 @@ async function processDirectory(dirPath) {
   const htmlPath = path.join(dirPath, htmlFiles[0]);
   console.log(`  Parsing HTML report: ${htmlFiles[0]}`);
 
+  // Detect EA name
+  const eaName = detectEAName(dirName, htmlPath);
+  console.log(`  EA Name: ${eaName}`);
+
   // Parse HTML report for statistics
   let reportData;
   try {
     reportData = parseHtmlReport(htmlPath);
     reportData.instrument = instrument;
     reportData.strategy = strategy;
+    reportData.eaName = eaName; // Add EA name to report data
   } catch (error) {
     console.error(`  Error parsing HTML report: ${error.message}`);
     return;

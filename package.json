@@ -8,6 +8,7 @@
     "start": "node index.js",
     "upload": "node upload.js",
     "setup-db": "node setup-db.js",
+    "migrate-db": "node migrate-db.js",
     "queries": "node example-queries.js",
     "server": "node server.js",
     "dev": "node server.js"

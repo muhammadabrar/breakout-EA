@@ -3,6 +3,7 @@ const API_BASE = '/api';
 let monthlyChart = null;
 let selectedInstruments = ['us30', 'us100', 'xau'];
 let selectedStrategies = ['Daily', 'Daily + London'];
+let selectedEAs = ['Breakout EA by currency pro', 'Cyberspace EA'];
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -56,7 +57,12 @@ function updateSelectedFilters() {
     selectedStrategies = Array.from(strategyGroup.querySelectorAll('input[type="checkbox"]:checked'))
         .map(cb => cb.value);
     
-    console.log('Filters updated:', { selectedInstruments, selectedStrategies });
+    // Get EA types from third filter group
+    const eaGroup = document.querySelectorAll('.filter-group')[2];
+    selectedEAs = Array.from(eaGroup.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(cb => cb.value);
+    
+    console.log('Filters updated:', { selectedInstruments, selectedStrategies, selectedEAs });
 }
 
 async function fetchAPI(endpoint, params = {}) {
@@ -95,10 +101,17 @@ function formatDate(dateString) {
 async function loadOverview() {
     showLoading();
     try {
-        const reports = await fetchAPI('/reports');
-        const filteredReports = reports.filter(r => 
+        // Fetch reports for all selected EAs
+        const allReports = [];
+        for (const eaName of selectedEAs) {
+            const reports = await fetchAPI('/reports', { eaName });
+            allReports.push(...reports);
+        }
+        
+        const filteredReports = allReports.filter(r => 
             selectedInstruments.includes(r.instrument) && 
-            selectedStrategies.includes(r.strategy)
+            selectedStrategies.includes(r.strategy) &&
+            selectedEAs.includes(r.ea_name)
         );
         
         displayOverview(filteredReports);
@@ -125,10 +138,14 @@ function displayOverview(reports) {
     
     // Display table
     const tbody = document.getElementById('reportsBody');
-    tbody.innerHTML = reports.map(r => `
+    tbody.innerHTML = reports.map(r => {
+        const shortEAName = r.ea_name && r.ea_name.includes('Breakout') ? 'Breakout' : 
+                           (r.ea_name && r.ea_name.includes('Cyberspace') ? 'Cyberspace' : r.ea_name || 'N/A');
+        return `
         <tr>
             <td><strong>${r.instrument.toUpperCase()}</strong></td>
             <td>${r.strategy}</td>
+            <td>${shortEAName}</td>
             <td class="${parseFloat(r.net_profit) >= 0 ? 'positive' : 'negative'}">
                 ${formatCurrency(r.net_profit)}
             </td>
@@ -136,42 +153,60 @@ function displayOverview(reports) {
             <td>${formatPercent(r.win_rate)}</td>
             <td class="negative">${formatCurrency(r.balance_drawdown_maximal)}</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 async function loadMonthlyReport() {
     showLoading();
     try {
-        // Fetch monthly data for all selected combinations
-        const monthlyDataPromises = selectedInstruments.flatMap(instrument =>
-            selectedStrategies.map(strategy =>
-                fetchAPI('/monthly-pnl', { instrument, strategy }).then(data =>
-                    data.map(item => ({ ...item, month: new Date(item.month).toISOString() }))
+        // Fetch monthly data for each EA separately
+        const eaDataMap = {};
+        
+        for (const eaName of selectedEAs) {
+            const monthlyDataPromises = selectedInstruments.flatMap(instrument =>
+                selectedStrategies.map(strategy =>
+                    fetchAPI('/monthly-pnl', { instrument, strategy, eaName }).then(data =>
+                        data.map(item => ({ ...item, month: new Date(item.month).toISOString() }))
+                    )
                 )
-            )
-        );
+            );
+            
+            const allMonthlyData = (await Promise.all(monthlyDataPromises)).flat();
+            
+            // Group by month and sum all instruments/strategies for this EA
+            const grouped = allMonthlyData.reduce((acc, item) => {
+                const monthKey = item.month;
+                if (!acc[monthKey]) {
+                    acc[monthKey] = {
+                        month: item.month,
+                        monthFormatted: formatDate(item.month),
+                        totalPnL: 0,
+                        totalTrades: 0,
+                        winningTrades: 0,
+                        losingTrades: 0,
+                        instruments: {}
+                    };
+                }
+                acc[monthKey].totalPnL += parseFloat(item.monthly_pnl || 0);
+                acc[monthKey].totalTrades += parseInt(item.trade_count || 0);
+                acc[monthKey].winningTrades += parseInt(item.winning_trades || 0);
+                acc[monthKey].losingTrades += parseInt(item.losing_trades || 0);
+                
+                if (!acc[monthKey].instruments[item.instrument]) {
+                    acc[monthKey].instruments[item.instrument] = 0;
+                }
+                acc[monthKey].instruments[item.instrument] += parseFloat(item.monthly_pnl || 0);
+                
+                return acc;
+            }, {});
+            
+            eaDataMap[eaName] = Object.values(grouped).sort((a, b) => 
+                new Date(b.month) - new Date(a.month)
+            );
+        }
         
-        const allMonthlyData = (await Promise.all(monthlyDataPromises)).flat();
-        
-        // Group by month and instrument/strategy
-        const grouped = allMonthlyData.reduce((acc, item) => {
-            const key = `${item.month}_${item.instrument}_${item.strategy}`;
-            if (!acc[key]) {
-                acc[key] = item;
-            } else {
-                acc[key].monthly_pnl = (parseFloat(acc[key].monthly_pnl) || 0) + (parseFloat(item.monthly_pnl) || 0);
-                acc[key].trade_count = (parseInt(acc[key].trade_count) || 0) + (parseInt(item.trade_count) || 0);
-                acc[key].winning_trades = (parseInt(acc[key].winning_trades) || 0) + (parseInt(item.winning_trades) || 0);
-                acc[key].losing_trades = (parseInt(acc[key].losing_trades) || 0) + (parseInt(item.losing_trades) || 0);
-            }
-            return acc;
-        }, {});
-        
-        const monthlyArray = Object.values(grouped).sort((a, b) => 
-            new Date(b.month) - new Date(a.month)
-        );
-        
-        displayMonthlyReport(monthlyArray);
+        displayMonthlyReport(eaDataMap);
     } catch (error) {
         console.error('Error loading monthly report:', error);
         alert('Error loading monthly report: ' + error.message);
@@ -180,42 +215,38 @@ async function loadMonthlyReport() {
     }
 }
 
-function displayMonthlyReport(data) {
-    // Group by month and sum all instruments/strategies first
-    const monthlyTotals = data.reduce((acc, item) => {
-        const monthKey = formatDate(item.month);
-        if (!acc[monthKey]) {
-            acc[monthKey] = {
-                month: item.month,
-                monthFormatted: monthKey,
-                totalPnL: 0,
-                totalTrades: 0,
-                winningTrades: 0,
-                losingTrades: 0,
-                instruments: {} // Track per-instrument totals
-            };
-        }
-        acc[monthKey].totalPnL += parseFloat(item.monthly_pnl || 0);
-        acc[monthKey].totalTrades += parseInt(item.trade_count || 0);
-        acc[monthKey].winningTrades += parseInt(item.winning_trades || 0);
-        acc[monthKey].losingTrades += parseInt(item.losing_trades || 0);
-        
-        // Track per-instrument totals
-        if (!acc[monthKey].instruments[item.instrument]) {
-            acc[monthKey].instruments[item.instrument] = 0;
-        }
-        acc[monthKey].instruments[item.instrument] += parseFloat(item.monthly_pnl || 0);
-        
-        return acc;
-    }, {});
+function displayMonthlyReport(eaDataMap) {
+    // Get all unique months across all EAs
+    const allMonths = new Set();
+    Object.values(eaDataMap).forEach(eaData => {
+        eaData.forEach(item => allMonths.add(item.month));
+    });
     
-    const monthlyArray = Object.values(monthlyTotals).sort((a, b) => 
-        new Date(b.month) - new Date(a.month)
-    );
+    const sortedMonths = Array.from(allMonths).sort((a, b) => new Date(b) - new Date(a));
     
-    // Calculate statistics from combined totals
-    const profitableMonths = monthlyArray.filter(item => item.totalPnL > 0);
-    const losingMonths = monthlyArray.filter(item => item.totalPnL < 0);
+    // Combine data from all EAs by month
+    const combinedMonthlyData = sortedMonths.map(month => {
+        const monthData = {
+            month,
+            monthFormatted: formatDate(month),
+            eas: {}
+        };
+        
+        // Get data for each EA for this month
+        Object.entries(eaDataMap).forEach(([eaName, eaData]) => {
+            const monthItem = eaData.find(item => item.month === month);
+            if (monthItem) {
+                monthData.eas[eaName] = monthItem;
+            }
+        });
+        
+        return monthData;
+    });
+    
+    // Calculate statistics from all EA data combined
+    const allEAData = Object.values(eaDataMap).flat();
+    const profitableMonths = allEAData.filter(item => item.totalPnL > 0);
+    const losingMonths = allEAData.filter(item => item.totalPnL < 0);
     
     const avgProfit = profitableMonths.length > 0
         ? profitableMonths.reduce((sum, item) => sum + item.totalPnL, 0) / profitableMonths.length
@@ -225,18 +256,13 @@ function displayMonthlyReport(data) {
         ? losingMonths.reduce((sum, item) => sum + item.totalPnL, 0) / losingMonths.length
         : 0;
     
-    const lossMonthCount = losingMonths.length;
-    
-    const maxProfit = monthlyArray.length > 0
-        ? Math.max(...monthlyArray.map(item => item.totalPnL))
+    const maxProfit = allEAData.length > 0
+        ? Math.max(...allEAData.map(item => item.totalPnL))
         : 0;
     
-    const maxLoss = monthlyArray.length > 0
-        ? Math.min(...monthlyArray.map(item => item.totalPnL))
+    const maxLoss = allEAData.length > 0
+        ? Math.min(...allEAData.map(item => item.totalPnL))
         : 0;
-    
-    const maxProfitMonth = monthlyArray.find(item => item.totalPnL === maxProfit);
-    const maxLossMonth = monthlyArray.find(item => item.totalPnL === maxLoss);
     
     // Display statistics
     const statsContainer = document.getElementById('monthlyStats');
@@ -249,116 +275,78 @@ function displayMonthlyReport(data) {
         <div class="stat-card">
             <h3>Average Loss per Month</h3>
             <p class="stat-value negative">${formatCurrency(avgLoss)}</p>
-            <p class="stat-subtitle">${lossMonthCount} losing months</p>
+            <p class="stat-subtitle">${losingMonths.length} losing months</p>
         </div>
         <div class="stat-card">
             <h3>Max Profit (Single Month)</h3>
             <p class="stat-value positive">${formatCurrency(maxProfit)}</p>
-            <p class="stat-subtitle">${maxProfitMonth ? maxProfitMonth.monthFormatted : 'N/A'}</p>
         </div>
         <div class="stat-card">
             <h3>Max Loss (Single Month)</h3>
             <p class="stat-value negative">${formatCurrency(maxLoss)}</p>
-            <p class="stat-subtitle">${maxLossMonth ? maxLossMonth.monthFormatted : 'N/A'}</p>
         </div>
     `;
     
-    // Calculate worst months by instrument
-    const worstMonthsByInstrument = selectedInstruments.map(instrument => {
-        const instrumentData = data.filter(item => item.instrument === instrument);
-        if (instrumentData.length === 0) return null;
-        
-        const worstMonth = instrumentData.reduce((worst, current) => {
-            const currentPnL = parseFloat(current.monthly_pnl || 0);
-            const worstPnL = parseFloat(worst.monthly_pnl || 0);
-            return currentPnL < worstPnL ? current : worst;
-        });
-        
-        return worstMonth;
-    }).filter(item => item !== null && parseFloat(item.monthly_pnl) < 0);
-    
-    // Display worst months table
-    if (worstMonthsByInstrument.length > 0) {
-        const worstMonthsBody = document.getElementById('worstMonthsBody');
-        worstMonthsBody.innerHTML = worstMonthsByInstrument
-            .sort((a, b) => parseFloat(a.monthly_pnl) - parseFloat(b.monthly_pnl))
-            .map(item => `
-                <tr>
-                    <td><strong>${item.instrument.toUpperCase()}</strong></td>
-                    <td>${formatDate(item.month)}</td>
-                    <td>${item.strategy}</td>
-                    <td class="negative">${formatCurrency(item.monthly_pnl)}</td>
-                    <td>${formatNumber(item.trade_count)}</td>
-                </tr>
-            `).join('');
-        
-        document.getElementById('worstMonthsContainer').style.display = 'block';
-    } else {
-        document.getElementById('worstMonthsContainer').style.display = 'none';
-    }
-    
-    // Update table with combined totals (monthlyArray already calculated above)
-    const tbody = document.getElementById('monthlyBody');
-    tbody.innerHTML = monthlyArray.map(item => {
-        const winRate = item.totalTrades > 0 ? (item.winningTrades / item.totalTrades * 100) : 0;
-        return `
-            <tr>
-                <td><strong>${item.monthFormatted}</strong></td>
-                <td class="${item.totalPnL >= 0 ? 'positive' : 'negative'}">
-                    <strong>${formatCurrency(item.totalPnL)}</strong>
-                </td>
-                <td>${formatNumber(item.totalTrades)}</td>
-                <td class="positive">${formatNumber(item.winningTrades)}</td>
-                <td class="negative">${formatNumber(item.losingTrades)}</td>
-                <td>${formatPercent(winRate)}</td>
-            </tr>
-        `;
-    }).join('');
-    
-    // Update calendar grid
+    // Update calendar grid - show both EAs side by side
     const calendarGrid = document.getElementById('calendarGrid');
-    calendarGrid.innerHTML = monthlyArray.map(item => {
-        const date = new Date(item.month);
+    calendarGrid.innerHTML = combinedMonthlyData.map(monthData => {
+        const date = new Date(monthData.month);
         const monthName = date.toLocaleDateString('en-US', { month: 'short' });
         const year = date.getFullYear();
-        const winRate = item.totalTrades > 0 ? (item.winningTrades / item.totalTrades * 100).toFixed(1) : 0;
         
-        // Build instrument breakdown
-        const instrumentBreakdown = selectedInstruments
-            .filter(inst => item.instruments[inst] !== undefined)
-            .map(inst => {
-                const pnl = item.instruments[inst];
-                return `
-                    <div class="calendar-instrument">
-                        <span class="instrument-label">${inst.toUpperCase()}:</span>
-                        <span class="${pnl >= 0 ? 'positive' : 'negative'}">${formatCurrency(pnl)}</span>
+        // Build EA comparison cards
+        const eaCards = Object.entries(monthData.eas).map(([eaName, eaItem]) => {
+            const shortEAName = eaName.includes('Breakout') ? 'Breakout' : 'Cyberspace';
+            const winRate = eaItem.totalTrades > 0 ? (eaItem.winningTrades / eaItem.totalTrades * 100).toFixed(1) : 0;
+            
+            // Build instrument breakdown for this EA
+            const instrumentBreakdown = selectedInstruments
+                .filter(inst => eaItem.instruments[inst] !== undefined)
+                .map(inst => {
+                    const pnl = eaItem.instruments[inst];
+                    return `
+                        <div class="calendar-instrument">
+                            <span class="instrument-label">${inst.toUpperCase()}:</span>
+                            <span class="${pnl >= 0 ? 'positive' : 'negative'}">${formatCurrency(pnl)}</span>
+                        </div>
+                    `;
+                }).join('');
+            
+            return `
+                <div class="calendar-ea-card ${eaItem.totalPnL >= 0 ? 'profit' : 'loss'}">
+                    <div class="calendar-ea-name">${shortEAName} EA</div>
+                    <div class="calendar-pnl ${eaItem.totalPnL >= 0 ? 'positive' : 'negative'}">
+                        ${formatCurrency(eaItem.totalPnL)}
                     </div>
-                `;
-            }).join('');
+                    <div class="calendar-instruments">
+                        ${instrumentBreakdown}
+                    </div>
+                    <div class="calendar-stats">
+                        <div>Win Rate: ${winRate}%</div>
+                        <div>Trades: ${formatNumber(eaItem.totalTrades)}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
         
         return `
-            <div class="calendar-item ${item.totalPnL >= 0 ? 'profit' : 'loss'}">
-                <div class="calendar-month">${monthName}</div>
-                <div class="calendar-year">${year}</div>
-                <div class="calendar-pnl ${item.totalPnL >= 0 ? 'positive' : 'negative'}">
-                    ${formatCurrency(item.totalPnL)}
+            <div class="calendar-month-wrapper">
+                <div class="calendar-month-header">
+                    <div class="calendar-month">${monthName}</div>
+                    <div class="calendar-year">${year}</div>
                 </div>
-                <div class="calendar-instruments">
-                    ${instrumentBreakdown}
-                </div>
-                <div class="calendar-stats">
-                    <div>Trades: ${formatNumber(item.totalTrades)}</div>
-                    <div>Win Rate: ${formatPercent(winRate)}</div>
-                    <div>Wins: <span class="positive">${formatNumber(item.winningTrades)}</span></div>
-                    <div>Losses: <span class="negative">${formatNumber(item.losingTrades)}</span></div>
+                <div class="calendar-eas-container">
+                    ${eaCards}
                 </div>
             </div>
         `;
     }).join('');
     
     // Update chart with combined totals
-    const labels = monthlyArray.map(item => item.monthFormatted).reverse();
-    const totalPnLData = monthlyArray.map(item => item.totalPnL).reverse();
+    const labels = combinedMonthlyData.map(item => item.monthFormatted).reverse();
+    const totalPnLData = combinedMonthlyData.map(item => {
+        return Object.values(item.eas).reduce((sum, eaItem) => sum + eaItem.totalPnL, 0);
+    }).reverse();
     
     const datasets = [{
         label: 'Total P&L (All Instruments)',
@@ -409,7 +397,8 @@ async function loadCombinedStats() {
     try {
         const stats = await fetchAPI('/combined-stats', {
             instruments: selectedInstruments.join(','),
-            strategies: selectedStrategies.join(',')
+            strategies: selectedStrategies.join(','),
+            eaNames: selectedEAs.join(',')
         });
         
         displayCombinedStats(stats);
@@ -423,10 +412,14 @@ async function loadCombinedStats() {
 
 function displayCombinedStats(stats) {
     const tbody = document.getElementById('statsBody');
-    tbody.innerHTML = stats.map(item => `
+    tbody.innerHTML = stats.map(item => {
+        const shortEAName = item.ea_name && item.ea_name.includes('Breakout') ? 'Breakout' : 
+                           (item.ea_name && item.ea_name.includes('Cyberspace') ? 'Cyberspace' : item.ea_name || 'N/A');
+        return `
         <tr>
             <td><strong>${item.instrument.toUpperCase()}</strong></td>
             <td>${item.strategy}</td>
+            <td>${shortEAName}</td>
             <td class="${parseFloat(item.total_net_profit) >= 0 ? 'positive' : 'negative'}">
                 ${formatCurrency(item.total_net_profit)}
             </td>
@@ -434,7 +427,8 @@ function displayCombinedStats(stats) {
             <td>${formatPercent(item.combined_win_rate)}</td>
             <td class="negative">${formatCurrency(item.max_drawdown)}</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function showLoading() {

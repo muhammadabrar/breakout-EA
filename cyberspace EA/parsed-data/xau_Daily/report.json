@@ -1,0 +1,19 @@
+{
+  "instrument": "xau",
+  "netProfit": 91281.34,
+  "balanceDrawdownAbsolute": 377.53,
+  "equityDrawdownAbsolute": 375.42,
+  "balanceDrawdownMaximal": 6300.09,
+  "equityDrawdownMaximal": 7057.49,
+  "balanceDrawdownRelative": 11.14,
+  "equityDrawdownRelative": 12.44,
+  "totalTrades": 687,
+  "profitableTrades": 588,
+  "winRate": 85.59,
+  "lossRate": 14.41,
+  "maxConsecutiveWins": 39,
+  "maxConsecutiveLosses": 3,
+  "consecutiveWins": 7,
+  "consecutiveLosses": 1,
+  "strategy": "Daily"
+}

@@ -40,9 +40,18 @@ async function setupDatabase() {
         max_consecutive_wins INTEGER,
         max_consecutive_losses INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(instrument, strategy)
+        UNIQUE(instrument, strategy, ea_name)
       );
     `);
+    
+    // Migrate existing unique constraint if needed
+    try {
+      await pool.query(`
+        ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_instrument_strategy_key;
+      `);
+    } catch (e) {
+      // Constraint might not exist, ignore
+    }
 
     // Create balance_equity table for time series data
     await pool.query(`
@@ -86,6 +95,8 @@ async function setupDatabase() {
     // Create indexes for better query performance
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_reports_instrument_strategy ON reports(instrument, strategy);
+      CREATE INDEX IF NOT EXISTS idx_reports_ea_name ON reports(ea_name);
+      CREATE INDEX IF NOT EXISTS idx_reports_instrument_strategy_ea ON reports(instrument, strategy, ea_name);
       CREATE INDEX IF NOT EXISTS idx_balance_equity_report_id ON balance_equity(report_id);
       CREATE INDEX IF NOT EXISTS idx_balance_equity_instrument_strategy ON balance_equity(instrument, strategy);
       CREATE INDEX IF NOT EXISTS idx_balance_equity_date_time ON balance_equity(date_time);

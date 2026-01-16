@@ -31,7 +31,7 @@ export async function uploadReport(reportData) {
       max_consecutive_wins, max_consecutive_losses
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-    ON CONFLICT (instrument, strategy) 
+    ON CONFLICT (instrument, strategy, ea_name) 
     DO UPDATE SET
       ea_name = EXCLUDED.ea_name,
       net_profit = EXCLUDED.net_profit,
@@ -76,9 +76,9 @@ export async function uploadReport(reportData) {
   return result.rows[0].id;
 }
 
-export async function getReportId(instrument, strategy) {
-  const query = 'SELECT id FROM reports WHERE instrument = $1 AND strategy = $2';
-  const result = await pool.query(query, [instrument, strategy]);
+export async function getReportId(instrument, strategy, eaName = 'Breakout EA by currency pro') {
+  const query = 'SELECT id FROM reports WHERE instrument = $1 AND strategy = $2 AND ea_name = $3';
+  const result = await pool.query(query, [instrument, strategy, eaName]);
   return result.rows[0]?.id || null;
 }
 

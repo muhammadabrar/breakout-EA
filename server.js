@@ -21,7 +21,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // API Routes
 app.get('/api/reports', async (req, res) => {
   try {
-    const reports = await getAllReports();
+    const { eaName } = req.query;
+    const reports = await getAllReports(eaName || null);
     res.json(reports);
   } catch (error) {
     console.error('Error fetching reports:', error);
@@ -31,10 +32,11 @@ app.get('/api/reports', async (req, res) => {
 
 app.get('/api/monthly-pnl', async (req, res) => {
   try {
-    const { instrument, strategy } = req.query;
+    const { instrument, strategy, eaName } = req.query;
     const monthlyPnL = await getMonthlyPnL(
       instrument || null,
-      strategy || null
+      strategy || null,
+      eaName || null
     );
     res.json(monthlyPnL);
   } catch (error) {
@@ -45,11 +47,12 @@ app.get('/api/monthly-pnl', async (req, res) => {
 
 app.get('/api/combined-stats', async (req, res) => {
   try {
-    const { instruments, strategies } = req.query;
+    const { instruments, strategies, eaNames } = req.query;
     const instrumentsArray = instruments ? instruments.split(',') : [];
     const strategiesArray = strategies ? strategies.split(',') : [];
+    const eaNamesArray = eaNames ? eaNames.split(',') : [];
     
-    const stats = await getCombinedStats(instrumentsArray, strategiesArray);
+    const stats = await getCombinedStats(instrumentsArray, strategiesArray, eaNamesArray);
     res.json(stats);
   } catch (error) {
     console.error('Error fetching combined stats:', error);

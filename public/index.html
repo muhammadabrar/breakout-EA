@@ -26,6 +26,11 @@
                 <label><input type="checkbox" value="Daily" checked> Daily</label>
                 <label><input type="checkbox" value="Daily + London" checked> Daily + London</label>
             </div>
+            <div class="filter-group">
+                <h3>EA Type</h3>
+                <label><input type="checkbox" value="Breakout EA by currency pro" checked> Breakout EA</label>
+                <label><input type="checkbox" value="Cyberspace EA" checked> Cyberspace EA</label>
+            </div>
             <button id="applyFilters" class="btn btn-primary">Apply Filters</button>
         </div>
 
@@ -66,6 +71,7 @@
                         <tr>
                             <th>Instrument</th>
                             <th>Strategy</th>
+                            <th>EA Type</th>
                             <th>Net Profit</th>
                             <th>Total Trades</th>
                             <th>Win Rate</th>
@@ -85,23 +91,6 @@
             </div>
             <div class="chart-container">
                 <canvas id="monthlyChart"></canvas>
-            </div>
-            <div class="table-container">
-                <h2>Monthly P&L - Combined All Instruments</h2>
-                <table id="monthlyTable">
-                    <thead>
-                        <tr>
-                            <th>Month</th>
-                            <th>Total P&L</th>
-                            <th>Total Trades</th>
-                            <th>Winning Trades</th>
-                            <th>Losing Trades</th>
-                            <th>Win Rate</th>
-                        </tr>
-                    </thead>
-                    <tbody id="monthlyBody">
-                    </tbody>
-                </table>
             </div>
             <div class="calendar-grid-container">
                 <h2>Monthly Calendar View</h2>
@@ -136,6 +125,7 @@
                         <tr>
                             <th>Instrument</th>
                             <th>Strategy</th>
+                            <th>EA Type</th>
                             <th>Total Net Profit</th>
                             <th>Total Trades</th>
                             <th>Win Rate</th>

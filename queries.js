@@ -70,34 +70,41 @@ export async function getWinRate(instrument = null, strategy = null) {
 /**
  * Get monthly PnL for all available months
  */
-export async function getMonthlyPnL(instrument = null, strategy = null) {
+export async function getMonthlyPnL(instrument = null, strategy = null, eaName = null) {
   let query = `
     SELECT 
-      DATE_TRUNC('month', time) as month,
-      instrument,
-      strategy,
-      SUM(profit) as monthly_pnl,
+      DATE_TRUNC('month', d.time) as month,
+      d.instrument,
+      d.strategy,
+      r.ea_name,
+      SUM(d.profit) as monthly_pnl,
       COUNT(*) as trade_count,
-      SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) as winning_trades,
-      SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END) as losing_trades
-    FROM deals
-    WHERE profit IS NOT NULL
+      SUM(CASE WHEN d.profit > 0 THEN 1 ELSE 0 END) as winning_trades,
+      SUM(CASE WHEN d.profit < 0 THEN 1 ELSE 0 END) as losing_trades
+    FROM deals d
+    JOIN reports r ON d.report_id = r.id
+    WHERE d.profit IS NOT NULL
   `;
   const params = [];
 
   if (instrument) {
-    query += ` AND instrument = $${params.length + 1}`;
+    query += ` AND d.instrument = $${params.length + 1}`;
     params.push(instrument);
   }
 
   if (strategy) {
-    query += ` AND strategy = $${params.length + 1}`;
+    query += ` AND d.strategy = $${params.length + 1}`;
     params.push(strategy);
   }
 
+  if (eaName) {
+    query += ` AND r.ea_name = $${params.length + 1}`;
+    params.push(eaName);
+  }
+
   query += `
-    GROUP BY DATE_TRUNC('month', time), instrument, strategy
-    ORDER BY month DESC, instrument, strategy
+    GROUP BY DATE_TRUNC('month', d.time), d.instrument, d.strategy, r.ea_name
+    ORDER BY month DESC, d.instrument, d.strategy, r.ea_name
   `;
 
   const result = await pool.query(query, params);
@@ -107,11 +114,12 @@ export async function getMonthlyPnL(instrument = null, strategy = null) {
 /**
  * Get combined statistics across multiple instruments
  */
-export async function getCombinedStats(instruments = [], strategies = []) {
+export async function getCombinedStats(instruments = [], strategies = [], eaNames = []) {
   let query = `
     SELECT 
       instrument,
       strategy,
+      ea_name,
       SUM(net_profit) as total_net_profit,
       SUM(profitable_trades) as total_profitable_trades,
       SUM(total_trades) as total_trades,
@@ -133,7 +141,12 @@ export async function getCombinedStats(instruments = [], strategies = []) {
     params.push(strategies);
   }
 
-  query += ` GROUP BY instrument, strategy ORDER BY total_net_profit DESC`;
+  if (eaNames.length > 0) {
+    query += ` AND ea_name = ANY($${params.length + 1})`;
+    params.push(eaNames);
+  }
+
+  query += ` GROUP BY instrument, strategy, ea_name ORDER BY total_net_profit DESC`;
 
   const result = await pool.query(query, params);
   return result.rows;
@@ -142,12 +155,13 @@ export async function getCombinedStats(instruments = [], strategies = []) {
 /**
  * Get all reports summary
  */
-export async function getAllReports() {
-  const query = `
+export async function getAllReports(eaName = null) {
+  let query = `
     SELECT 
       id,
       instrument,
       strategy,
+      ea_name,
       net_profit,
       profitable_trades,
       total_trades,
@@ -160,10 +174,18 @@ export async function getAllReports() {
       max_consecutive_wins,
       max_consecutive_losses
     FROM reports
-    ORDER BY instrument, strategy
+    WHERE 1=1
   `;
+  const params = [];
 
-  const result = await pool.query(query);
+  if (eaName) {
+    query += ` AND ea_name = $1`;
+    params.push(eaName);
+  }
+
+  query += ` ORDER BY instrument, strategy, ea_name`;
+
+  const result = await pool.query(query, params);
   return result.rows;
 }
 

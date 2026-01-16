@@ -34,8 +34,13 @@ async function uploadFromJson(jsonDir) {
     try {
       // Read and upload report
       const reportData = await fs.readJSON(reportFile);
+      
+      // Always set EA name to Cyberspace EA for reports uploaded from cyberspace EA directory
+      reportData.eaName = 'Cyberspace EA';
+      
       console.log(`  Reading report.json...`);
       console.log(`    Instrument: ${reportData.instrument}, Strategy: ${reportData.strategy}`);
+      console.log(`    EA Name: ${reportData.eaName}`);
       console.log(`    Net Profit: ${reportData.netProfit}, Total Trades: ${reportData.totalTrades}`);
 
       const reportId = await uploadReport(reportData);
@@ -57,7 +62,7 @@ async function uploadFromJson(jsonDir) {
       }
       
       const strategyDirName = `${instrument} - ${strategyDirPart}`;
-      const originalDir = path.join(__dirname, strategyDirName);
+      const originalDir = path.join(__dirname, 'cyberspace EA', strategyDirName);
 
       if (fs.existsSync(originalDir)) {
         const csvFiles = fs.readdirSync(originalDir).filter(f => 
@@ -111,7 +116,7 @@ async function uploadFromJson(jsonDir) {
 }
 
 async function main() {
-  const jsonDir = path.join(__dirname, 'parsed-data');
+  const jsonDir = path.join(__dirname, 'cyberspace EA', 'parsed-data');
   
   if (!fs.existsSync(jsonDir)) {
     console.error(`Error: Directory ${jsonDir} does not exist.`);

@@ -119,8 +119,8 @@ async function processDirectory(dirPath, outputDir) {
 }
 
 async function main() {
-  const baseDir = __dirname;
-  const outputDir = path.join(baseDir, 'parsed-data');
+  const baseDir = __dirname + '/cyberspace EA';
+  const outputDir = path.join(baseDir, 'parsed-data/cyberspace');
   
   // Clean and create output directory
   await fs.remove(outputDir);
