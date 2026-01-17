@@ -20,6 +20,16 @@ enum ENUM_TSL_MODE
 };
 
 //+------------------------------------------------------------------+
+//| Breakout Mode Selection                                           |
+//+------------------------------------------------------------------+
+enum ENUM_BREAKOUT_MODE
+{
+   BREAKOUT_DAILY_ONLY,  // Daily Breakout Only
+   BREAKOUT_LONDON_ONLY, // London Session Breakout Only
+   BREAKOUT_BOTH         // Both Daily and London
+};
+
+//+------------------------------------------------------------------+
 //| Input Parameters                                                 |
 //+------------------------------------------------------------------+
 input group "=== Trading Settings ==="
@@ -28,6 +38,13 @@ input int InpStopLossPips = 60;                    // Stop Loss (Pips)
 input int InpTakeProfitPips = 120;                 // Take Profit (Pips)
 input int InpMagicNumber = 54322;                  // Magic Number
 input string InpOrderComment = "PrevDayBO";        // Order Comment
+input ENUM_BREAKOUT_MODE InpBreakoutMode = BREAKOUT_BOTH;  // Breakout Mode
+
+input group "=== London Session Settings ==="
+input int InpLondonStartHour = 8;                  // London Session Start Hour (GMT, 0-23)
+input int InpLondonStartMinute = 0;                // London Session Start Minute (0-59)
+input int InpLondonEndHour = 16;                    // London Session End Hour (GMT, 0-23)
+input int InpLondonEndMinute = 0;                   // London Session End Minute (0-59)
 
 input group "=== Trailing Stop Settings ==="
 input ENUM_TSL_MODE InpTrailingMode = TSL_OFF;     // Trailing Stop Mode
@@ -55,6 +72,11 @@ COrderInfo order;
 double prevDayHigh = 0;
 double prevDayLow = 0;
 bool prevDayCalculated = false;
+
+double londonHigh = 0;
+double londonLow = 0;
+bool londonCalculated = false;
+
 bool ordersPlaced = false;
 int currentDate = 0;
 bool tradesClosedToday = false;
@@ -62,6 +84,8 @@ double todayOpenPrice = 0;
 
 string lineHigh = "PrevDay_High";
 string lineLow = "PrevDay_Low";
+string lineLondonHigh = "London_High";
+string lineLondonLow = "London_Low";
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -100,6 +124,8 @@ void OnDeinit(const int reason)
 {
    ObjectDelete(0, lineHigh);
    ObjectDelete(0, lineLow);
+   ObjectDelete(0, lineLondonHigh);
+   ObjectDelete(0, lineLondonLow);
    Comment("");
 }
 
@@ -119,6 +145,7 @@ void OnTick()
    {
       currentDate = newDate;
       prevDayCalculated = false;
+      londonCalculated = false;
       ordersPlaced = false;
       tradesClosedToday = false;
       
@@ -157,13 +184,22 @@ void OnTick()
    }
    
    // Calculate previous day high/low (only on weekdays)
-   if(!prevDayCalculated)
+   if(!prevDayCalculated && (InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH))
    {
       CalculatePreviousDayHighLow();
    }
    
+   // Calculate London session high/low (only on weekdays)
+   if(!londonCalculated && (InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH))
+   {
+      CalculateLondonSessionHighLow();
+   }
+   
    // Place orders if ready and trading hours allow (only on weekdays)
-   if(prevDayCalculated && !ordersPlaced && IsTradingStartTime())
+   bool dailyReady = (InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH) ? prevDayCalculated : true;
+   bool londonReady = (InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) ? londonCalculated : true;
+   
+   if(dailyReady && londonReady && !ordersPlaced && IsTradingStartTime())
    {
       PlaceOrders();
       ordersPlaced = true;
@@ -265,6 +301,89 @@ void CalculatePreviousDayHighLow()
    else
    {
       Print("Failed to get previous day high/low");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate London session high and low                            |
+//+------------------------------------------------------------------+
+void CalculateLondonSessionHighLow()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   // Get previous day's date
+   datetime today = StringToTime(IntegerToString(timeStruct.year) + "." + 
+                                  IntegerToString(timeStruct.mon) + "." + 
+                                  IntegerToString(timeStruct.day) + " 00:00");
+   datetime prevDayStart = today - 86400; // 24 hours ago
+   
+   // Calculate London session start and end times for previous day
+   datetime londonStart = prevDayStart + InpLondonStartHour * 3600 + InpLondonStartMinute * 60;
+   datetime londonEnd = prevDayStart + InpLondonEndHour * 3600 + InpLondonEndMinute * 60;
+   
+   // If London session ends after midnight, adjust
+   if(londonEnd < londonStart)
+   {
+      londonEnd += 86400; // Add 24 hours
+   }
+   
+   // Get high/low for London session using M1 bars for precision
+   int startBar = iBarShift(_Symbol, PERIOD_M1, londonStart);
+   int endBar = iBarShift(_Symbol, PERIOD_M1, londonEnd);
+   
+   if(startBar < 0 || endBar < 0)
+   {
+      Print("Cannot find bars for London session. StartBar: ", startBar, " EndBar: ", endBar);
+      Print("London Start: ", TimeToString(londonStart), " London End: ", TimeToString(londonEnd));
+      return;
+   }
+   
+   // iBarShift returns bar index where 0 is current bar, larger numbers are older bars
+   // londonStart is earlier (older), so startBar should be larger than endBar
+   // If not, swap them
+   if(startBar < endBar)
+   {
+      int temp = startBar;
+      startBar = endBar;
+      endBar = temp;
+   }
+   
+   int bars = startBar - endBar + 1;
+   if(bars <= 0)
+   {
+      Print("Invalid bar range for London session. StartBar: ", startBar, " EndBar: ", endBar);
+      return;
+   }
+   
+   // Copy high and low data for London session
+   // Copy from endBar (more recent) to startBar (older), so we copy bars starting from endBar
+   double high[];
+   double low[];
+   ArrayResize(high, bars);
+   ArrayResize(low, bars);
+   
+   int copiedHigh = CopyHigh(_Symbol, PERIOD_M1, endBar, bars, high);
+   int copiedLow = CopyLow(_Symbol, PERIOD_M1, endBar, bars, low);
+   
+   if(copiedHigh > 0 && copiedLow > 0)
+   {
+      // Find maximum high and minimum low
+      londonHigh = high[ArrayMaximum(high)];
+      londonLow = low[ArrayMinimum(low)];
+      
+      londonCalculated = true;
+      
+      // Draw lines
+      if(InpShowLines)
+         DrawLondonLines();
+      
+      Print("London session calculated - High: ", londonHigh, " | Low: ", londonLow, 
+            " | Bars: ", bars, " (", TimeToString(londonStart), " to ", TimeToString(londonEnd), ")");
+   }
+   else
+   {
+      Print("Failed to get London session high/low. CopiedHigh: ", copiedHigh, " CopiedLow: ", copiedLow);
    }
 }
 
@@ -415,10 +534,30 @@ void PlaceOrders()
    Print("SL Pips: ", InpStopLossPips, " | SL Distance: ", slDistance);
    Print("TP Pips: ", InpTakeProfitPips, " | TP Distance: ", tpDistance);
    
+   // Place Daily Breakout Orders
+   if(InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
+   {
+      PlaceDailyOrders(lotSize, slDistance, tpDistance);
+   }
+   
+   // Place London Session Breakout Orders
+   if(InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
+   {
+      PlaceLondonOrders(lotSize, slDistance, tpDistance);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Place daily breakout orders                                       |
+//+------------------------------------------------------------------+
+void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
+{
+   string comment = InpOrderComment + "_Daily";
+   
    // Check if today's open is above previous day high - if so, skip buy trade
    if(todayOpenPrice > prevDayHigh)
    {
-      Print("Buy trade skipped: Today's open (", todayOpenPrice, ") is above previous day high (", prevDayHigh, ")");
+      Print("Daily Buy trade skipped: Today's open (", todayOpenPrice, ") is above previous day high (", prevDayHigh, ")");
    }
    else
    {
@@ -430,25 +569,25 @@ void PlaceOrders()
       // Validate SL/TP are correct distance from entry
       if(buySL > 0 && buyTP > 0 && buySL < buyPrice && buyTP > buyPrice)
       {
-         if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, InpOrderComment))
+         if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
+            Print("Daily Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
          }
          else
          {
-            Print("Failed to place Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+            Print("Failed to place Daily Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
       else
       {
-         Print("Invalid Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
+         Print("Invalid Daily Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
       }
    }
    
    // Check if today's open is below previous day low - if so, skip sell trade
    if(todayOpenPrice < prevDayLow)
    {
-      Print("Sell trade skipped: Today's open (", todayOpenPrice, ") is below previous day low (", prevDayLow, ")");
+      Print("Daily Sell trade skipped: Today's open (", todayOpenPrice, ") is below previous day low (", prevDayLow, ")");
    }
    else
    {
@@ -460,18 +599,86 @@ void PlaceOrders()
       // Validate SL/TP are correct distance from entry
       if(sellSL > 0 && sellTP > 0 && sellSL > sellPrice && sellTP < sellPrice)
       {
-         if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, InpOrderComment))
+         if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
+            Print("Daily Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
          }
          else
          {
-            Print("Failed to place Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+            Print("Failed to place Daily Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
       else
       {
-         Print("Invalid Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
+         Print("Invalid Daily Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Place London session breakout orders                              |
+//+------------------------------------------------------------------+
+void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
+{
+   string comment = InpOrderComment + "_London";
+   
+   // Check if today's open is above London high - if so, skip buy trade
+   if(todayOpenPrice > londonHigh)
+   {
+      Print("London Buy trade skipped: Today's open (", todayOpenPrice, ") is above London session high (", londonHigh, ")");
+   }
+   else
+   {
+      // Buy Stop above London high
+      double buyPrice = NormalizeDouble(londonHigh, _Digits);
+      double buySL = NormalizeDouble(buyPrice - slDistance, _Digits);
+      double buyTP = NormalizeDouble(buyPrice + tpDistance, _Digits);
+      
+      // Validate SL/TP are correct distance from entry
+      if(buySL > 0 && buyTP > 0 && buySL < buyPrice && buyTP > buyPrice)
+      {
+         if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment))
+         {
+            Print("London Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
+         }
+         else
+         {
+            Print("Failed to place London Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+         }
+      }
+      else
+      {
+         Print("Invalid London Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
+      }
+   }
+   
+   // Check if today's open is below London low - if so, skip sell trade
+   if(todayOpenPrice < londonLow)
+   {
+      Print("London Sell trade skipped: Today's open (", todayOpenPrice, ") is below London session low (", londonLow, ")");
+   }
+   else
+   {
+      // Sell Stop below London low
+      double sellPrice = NormalizeDouble(londonLow, _Digits);
+      double sellSL = NormalizeDouble(sellPrice + slDistance, _Digits);
+      double sellTP = NormalizeDouble(sellPrice - tpDistance, _Digits);
+      
+      // Validate SL/TP are correct distance from entry
+      if(sellSL > 0 && sellTP > 0 && sellSL > sellPrice && sellTP < sellPrice)
+      {
+         if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment))
+         {
+            Print("London Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
+         }
+         else
+         {
+            Print("Failed to place London Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+         }
+      }
+      else
+      {
+         Print("Invalid London Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
       }
    }
 }
@@ -806,17 +1013,41 @@ void DrawPrevDayLines()
    
    // Draw high line
    ObjectCreate(0, lineHigh, OBJ_HLINE, 0, 0, prevDayHigh);
-   ObjectSetInteger(0, lineHigh, OBJPROP_COLOR, clrYellow);
+   ObjectSetInteger(0, lineHigh, OBJPROP_COLOR, clrOrange);
    ObjectSetInteger(0, lineHigh, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, lineHigh, OBJPROP_WIDTH, 2);
+   ObjectSetInteger(0, lineHigh, OBJPROP_WIDTH, 1);
    ObjectSetString(0, lineHigh, OBJPROP_TEXT, "Prev Day High");
    
    // Draw low line
    ObjectCreate(0, lineLow, OBJ_HLINE, 0, 0, prevDayLow);
-   ObjectSetInteger(0, lineLow, OBJPROP_COLOR, clrYellow);
+   ObjectSetInteger(0, lineLow, OBJPROP_COLOR, clrOrange);
    ObjectSetInteger(0, lineLow, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(0, lineLow, OBJPROP_WIDTH, 2);
+   ObjectSetInteger(0, lineLow, OBJPROP_WIDTH, 1);
    ObjectSetString(0, lineLow, OBJPROP_TEXT, "Prev Day Low");
+}
+
+//+------------------------------------------------------------------+
+//| Draw London session high/low lines                                |
+//+------------------------------------------------------------------+
+void DrawLondonLines()
+{
+   // Delete old lines
+   ObjectDelete(0, lineLondonHigh);
+   ObjectDelete(0, lineLondonLow);
+   
+   // Draw high line
+   ObjectCreate(0, lineLondonHigh, OBJ_HLINE, 0, 0, londonHigh);
+   ObjectSetInteger(0, lineLondonHigh, OBJPROP_COLOR, clrLime);
+   ObjectSetInteger(0, lineLondonHigh, OBJPROP_STYLE, STYLE_DASH);
+   ObjectSetInteger(0, lineLondonHigh, OBJPROP_WIDTH, 1);
+   ObjectSetString(0, lineLondonHigh, OBJPROP_TEXT, "London High");
+   
+   // Draw low line
+   ObjectCreate(0, lineLondonLow, OBJ_HLINE, 0, 0, londonLow);
+   ObjectSetInteger(0, lineLondonLow, OBJPROP_COLOR, clrLime);
+   ObjectSetInteger(0, lineLondonLow, OBJPROP_STYLE, STYLE_DASH);
+   ObjectSetInteger(0, lineLondonLow, OBJPROP_WIDTH, 1);
+   ObjectSetString(0, lineLondonLow, OBJPROP_TEXT, "London Low");
 }
 
 //+------------------------------------------------------------------+
@@ -838,10 +1069,40 @@ void UpdateChartComment()
    string comment = "\n";
    comment += "===== Previous Day Breakout EA =====\n";
    comment += "Day: " + currentDay + (isWeekday ? " (Weekday)" : " (Weekend)") + "\n";
-   comment += "Previous Day High: " + DoubleToString(prevDayHigh, _Digits) + "\n";
-   comment += "Previous Day Low: " + DoubleToString(prevDayLow, _Digits) + "\n";
+   
+   // Show breakout mode
+   string modeStr = "";
+   if(InpBreakoutMode == BREAKOUT_DAILY_ONLY)
+      modeStr = "Daily Only";
+   else if(InpBreakoutMode == BREAKOUT_LONDON_ONLY)
+      modeStr = "London Only";
+   else
+      modeStr = "Both Daily & London";
+   comment += "Breakout Mode: " + modeStr + "\n";
+   
+   // Daily breakout info
+   if(InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
+   {
+      comment += "--- Daily Breakout ---\n";
+      comment += "Previous Day High: " + DoubleToString(prevDayHigh, _Digits) + "\n";
+      comment += "Previous Day Low: " + DoubleToString(prevDayLow, _Digits) + "\n";
+      comment += "Daily Calculated: " + (prevDayCalculated ? "Yes" : "No") + "\n";
+   }
+   
+   // London session info
+   if(InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
+   {
+      comment += "--- London Session Breakout ---\n";
+      comment += "London High: " + DoubleToString(londonHigh, _Digits) + "\n";
+      comment += "London Low: " + DoubleToString(londonLow, _Digits) + "\n";
+      comment += "London Session: " + IntegerToString(InpLondonStartHour) + ":" + 
+                 StringFormat("%02d", InpLondonStartMinute) + " - " + 
+                 IntegerToString(InpLondonEndHour) + ":" + 
+                 StringFormat("%02d", InpLondonEndMinute) + " GMT\n";
+      comment += "London Calculated: " + (londonCalculated ? "Yes" : "No") + "\n";
+   }
+   
    comment += "Today's Open: " + DoubleToString(todayOpenPrice, _Digits) + "\n";
-   comment += "Calculated: " + (prevDayCalculated ? "Yes" : "No") + "\n";
    comment += "Orders Placed: " + (ordersPlaced ? "Yes" : "No") + "\n";
    comment += "Trading Days: Monday - Friday\n";
    comment += "Trading Hours: " + IntegerToString(InpStartHour) + ":" + 
