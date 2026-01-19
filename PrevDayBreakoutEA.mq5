@@ -78,6 +78,8 @@ double londonLow = 0;
 bool londonCalculated = false;
 
 bool ordersPlaced = false;
+bool dailyOrdersPlaced = false;
+bool londonOrdersPlaced = false;
 int currentDate = 0;
 bool tradesClosedToday = false;
 double todayOpenPrice = 0;
@@ -147,6 +149,8 @@ void OnTick()
       prevDayCalculated = false;
       londonCalculated = false;
       ordersPlaced = false;
+      dailyOrdersPlaced = false;
+      londonOrdersPlaced = false;
       tradesClosedToday = false;
       
       // Get today's open price
@@ -189,28 +193,63 @@ void OnTick()
       CalculatePreviousDayHighLow();
    }
    
-   // Calculate London session high/low (only on weekdays)
-   if(!londonCalculated && (InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH))
+   // Calculate current day London session high/low (only on weekdays)
+   // Update continuously during London session
+   if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH))
    {
-      CalculateLondonSessionHighLow();
+      // Check if we're in or past London session start time
+      if(IsLondonSessionTime())
+      {
+         CalculateLondonSessionHighLow();
+      }
    }
    
-   // Place orders if ready and trading hours allow (only on weekdays)
-   bool dailyReady = (InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH) ? prevDayCalculated : true;
-   bool londonReady = (InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) ? londonCalculated : true;
-   
-   if(dailyReady && londonReady && !ordersPlaced && IsTradingStartTime())
+   // Place daily orders if ready and trading hours allow
+   if((InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH) && 
+      !dailyOrdersPlaced && prevDayCalculated && IsTradingStartTime())
    {
-      PlaceOrders();
-      ordersPlaced = true;
+      PlaceDailyOrders(InpLotSize, 
+                      InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
+                      InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+      dailyOrdersPlaced = true;
    }
+   
+   // Place London orders if ready and London session has started
+   if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) && 
+      !londonOrdersPlaced && londonCalculated && IsLondonSessionTime())
+   {
+      PlaceLondonOrders(InpLotSize,
+                        InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
+                        InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+      londonOrdersPlaced = true;
+   }
+   
+   // Update combined ordersPlaced flag for backward compatibility
+   ordersPlaced = dailyOrdersPlaced || londonOrdersPlaced;
    
    // Manage trailing stops (only on weekdays and during trading hours)
    if(IsWeekday() && InpTrailingMode != TSL_OFF)
       ManageTrailingStops();
    
+   // Periodically check for conflicting pending orders (every 10 seconds)
+   static datetime lastConflictCheck = 0;
+   if(TimeCurrent() - lastConflictCheck >= 10)
+   {
+      CancelConflictingPendingOrders();
+      lastConflictCheck = TimeCurrent();
+   }
+   
    // Update chart comment
    UpdateChartComment();
+}
+
+//+------------------------------------------------------------------+
+//| Trade transaction event handler                                  |
+//+------------------------------------------------------------------+
+void OnTrade()
+{
+   // Check for new positions and cancel conflicting pending orders
+   CancelConflictingPendingOrders();
 }
 
 //+------------------------------------------------------------------+
@@ -305,22 +344,21 @@ void CalculatePreviousDayHighLow()
 }
 
 //+------------------------------------------------------------------+
-//| Calculate London session high and low                            |
+//| Check if current time is during London session                  |
 //+------------------------------------------------------------------+
-void CalculateLondonSessionHighLow()
+bool IsLondonSessionTime()
 {
    MqlDateTime timeStruct;
    TimeToStruct(TimeCurrent(), timeStruct);
    
-   // Get previous day's date
+   // Get today's date
    datetime today = StringToTime(IntegerToString(timeStruct.year) + "." + 
                                   IntegerToString(timeStruct.mon) + "." + 
                                   IntegerToString(timeStruct.day) + " 00:00");
-   datetime prevDayStart = today - 86400; // 24 hours ago
    
-   // Calculate London session start and end times for previous day
-   datetime londonStart = prevDayStart + InpLondonStartHour * 3600 + InpLondonStartMinute * 60;
-   datetime londonEnd = prevDayStart + InpLondonEndHour * 3600 + InpLondonEndMinute * 60;
+   // Calculate London session start and end times for current day
+   datetime londonStart = today + InpLondonStartHour * 3600 + InpLondonStartMinute * 60;
+   datetime londonEnd = today + InpLondonEndHour * 3600 + InpLondonEndMinute * 60;
    
    // If London session ends after midnight, adjust
    if(londonEnd < londonStart)
@@ -328,15 +366,56 @@ void CalculateLondonSessionHighLow()
       londonEnd += 86400; // Add 24 hours
    }
    
+   datetime currentTime = TimeCurrent();
+   
+   // Check if current time is at or after London session start
+   return (currentTime >= londonStart);
+}
+
+//+------------------------------------------------------------------+
+//| Calculate current day London session high and low                |
+//+------------------------------------------------------------------+
+void CalculateLondonSessionHighLow()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   // Get today's date
+   datetime today = StringToTime(IntegerToString(timeStruct.year) + "." + 
+                                  IntegerToString(timeStruct.mon) + "." + 
+                                  IntegerToString(timeStruct.day) + " 00:00");
+   
+   // Calculate London session start and end times for current day
+   datetime londonStart = today + InpLondonStartHour * 3600 + InpLondonStartMinute * 60;
+   datetime londonEnd = today + InpLondonEndHour * 3600 + InpLondonEndMinute * 60;
+   
+   // If London session ends after midnight, adjust
+   if(londonEnd < londonStart)
+   {
+      londonEnd += 86400; // Add 24 hours
+   }
+   
+   datetime currentTime = TimeCurrent();
+   
+   // Use current time as end if London session hasn't ended yet
+   datetime endTime = (currentTime < londonEnd) ? currentTime : londonEnd;
+   
    // Get high/low for London session using M1 bars for precision
    int startBar = iBarShift(_Symbol, PERIOD_M1, londonStart);
-   int endBar = iBarShift(_Symbol, PERIOD_M1, londonEnd);
+   int endBar = iBarShift(_Symbol, PERIOD_M1, endTime);
    
    if(startBar < 0 || endBar < 0)
    {
-      Print("Cannot find bars for London session. StartBar: ", startBar, " EndBar: ", endBar);
-      Print("London Start: ", TimeToString(londonStart), " London End: ", TimeToString(londonEnd));
-      return;
+      // If bars not found, try with current time
+      if(startBar < 0)
+      {
+         Print("Cannot find start bar for London session. London Start: ", TimeToString(londonStart));
+         return;
+      }
+      if(endBar < 0)
+      {
+         endBar = 0; // Use current bar if end bar not found
+      }
    }
    
    // iBarShift returns bar index where 0 is current bar, larger numbers are older bars
@@ -378,8 +457,9 @@ void CalculateLondonSessionHighLow()
       if(InpShowLines)
          DrawLondonLines();
       
-      Print("London session calculated - High: ", londonHigh, " | Low: ", londonLow, 
-            " | Bars: ", bars, " (", TimeToString(londonStart), " to ", TimeToString(londonEnd), ")");
+      string status = (currentTime < londonEnd) ? " (Live)" : " (Complete)";
+      Print("Current day London session calculated - High: ", londonHigh, " | Low: ", londonLow, 
+            " | Bars: ", bars, status, " (", TimeToString(londonStart), " to ", TimeToString(endTime), ")");
    }
    else
    {
@@ -1003,6 +1083,121 @@ void DeletePendingOrders()
 }
 
 //+------------------------------------------------------------------+
+//| Cancel conflicting pending orders when positions are open        |
+//+------------------------------------------------------------------+
+void CancelConflictingPendingOrders()
+{
+   // Check all open positions
+   for(int posIdx = PositionsTotal() - 1; posIdx >= 0; posIdx--)
+   {
+      if(position.SelectByIndex(posIdx))
+      {
+         if(position.Symbol() == _Symbol && position.Magic() == InpMagicNumber)
+         {
+            double posEntry = position.PriceOpen();
+            double posSL = position.StopLoss();
+            double posTP = position.TakeProfit();
+            ENUM_POSITION_TYPE posType = position.Type();
+            
+            // Determine the price range between SL and TP
+            // For BUY: SL is below entry, TP is above entry
+            // For SELL: SL is above entry, TP is below entry
+            double minPrice, maxPrice;
+            
+            if(posSL > 0 && posTP > 0)
+            {
+               // Both SL and TP set - check if pending order is between them
+               minPrice = MathMin(posSL, posTP);
+               maxPrice = MathMax(posSL, posTP);
+            }
+            else if(posSL > 0)
+            {
+               // Only SL set - check from SL to entry (or beyond if needed)
+               if(posType == POSITION_TYPE_BUY)
+               {
+                  // BUY: SL below entry, check from SL to entry
+                  minPrice = posSL;
+                  maxPrice = posEntry;
+               }
+               else // SELL
+               {
+                  // SELL: SL above entry, check from entry to SL
+                  minPrice = posEntry;
+                  maxPrice = posSL;
+               }
+            }
+            else if(posTP > 0)
+            {
+               // Only TP set - check from entry to TP
+               if(posType == POSITION_TYPE_BUY)
+               {
+                  // BUY: TP above entry, check from entry to TP
+                  minPrice = posEntry;
+                  maxPrice = posTP;
+               }
+               else // SELL
+               {
+                  // SELL: TP below entry, check from TP to entry
+                  minPrice = posTP;
+                  maxPrice = posEntry;
+               }
+            }
+            else
+            {
+               // No SL/TP set, skip this position
+               continue;
+            }
+            
+            // Check all pending orders for conflicts
+            for(int ordIdx = OrdersTotal() - 1; ordIdx >= 0; ordIdx--)
+            {
+               if(order.SelectByIndex(ordIdx))
+               {
+                  if(order.Symbol() == _Symbol && order.Magic() == InpMagicNumber)
+                  {
+                     double orderPrice = order.PriceOpen();
+                     ENUM_ORDER_TYPE orderType = order.OrderType();
+                     
+                     // Check if this is an opposite order type (SELL orders for BUY position, BUY orders for SELL position)
+                     bool isOpposite = false;
+                     if(posType == POSITION_TYPE_BUY && (orderType == ORDER_TYPE_SELL_STOP || orderType == ORDER_TYPE_SELL_LIMIT))
+                        isOpposite = true;
+                     else if(posType == POSITION_TYPE_SELL && (orderType == ORDER_TYPE_BUY_STOP || orderType == ORDER_TYPE_BUY_LIMIT))
+                        isOpposite = true;
+                     
+                     // If opposite order and price is between minPrice and maxPrice, cancel it
+                     if(isOpposite && orderPrice >= minPrice && orderPrice <= maxPrice)
+                     {
+                        if(trade.OrderDelete(order.Ticket()))
+                        {
+                           string posTypeStr = (posType == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+                           string orderTypeStr = "";
+                           if(orderType == ORDER_TYPE_BUY_STOP) orderTypeStr = "BUY_STOP";
+                           else if(orderType == ORDER_TYPE_BUY_LIMIT) orderTypeStr = "BUY_LIMIT";
+                           else if(orderType == ORDER_TYPE_SELL_STOP) orderTypeStr = "SELL_STOP";
+                           else if(orderType == ORDER_TYPE_SELL_LIMIT) orderTypeStr = "SELL_LIMIT";
+                           
+                           Print("✓ Conflicting order cancelled: ", orderTypeStr, " at ", DoubleToString(orderPrice, _Digits), 
+                                 " (conflicts with open ", posTypeStr, " position #", position.Ticket(),
+                                 " | Entry: ", DoubleToString(posEntry, _Digits), 
+                                 " | SL: ", DoubleToString(posSL, _Digits), 
+                                 " | TP: ", DoubleToString(posTP, _Digits),
+                                 " | Range: ", DoubleToString(minPrice, _Digits), " - ", DoubleToString(maxPrice, _Digits), ")");
+                        }
+                        else
+                        {
+                           Print("✗ Failed to delete conflicting order: ", order.Ticket(), " Error: ", GetLastError());
+                        }
+                     }
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Draw previous day high/low lines                                  |
 //+------------------------------------------------------------------+
 void DrawPrevDayLines()
@@ -1087,12 +1282,13 @@ void UpdateChartComment()
       comment += "Previous Day High: " + DoubleToString(prevDayHigh, _Digits) + "\n";
       comment += "Previous Day Low: " + DoubleToString(prevDayLow, _Digits) + "\n";
       comment += "Daily Calculated: " + (prevDayCalculated ? "Yes" : "No") + "\n";
+      comment += "Daily Orders Placed: " + (dailyOrdersPlaced ? "Yes" : "No") + "\n";
    }
    
    // London session info
    if(InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
    {
-      comment += "--- London Session Breakout ---\n";
+      comment += "--- London Session Breakout (Current Day) ---\n";
       comment += "London High: " + DoubleToString(londonHigh, _Digits) + "\n";
       comment += "London Low: " + DoubleToString(londonLow, _Digits) + "\n";
       comment += "London Session: " + IntegerToString(InpLondonStartHour) + ":" + 
@@ -1100,10 +1296,10 @@ void UpdateChartComment()
                  IntegerToString(InpLondonEndHour) + ":" + 
                  StringFormat("%02d", InpLondonEndMinute) + " GMT\n";
       comment += "London Calculated: " + (londonCalculated ? "Yes" : "No") + "\n";
+      comment += "London Orders Placed: " + (londonOrdersPlaced ? "Yes" : "No") + "\n";
    }
    
    comment += "Today's Open: " + DoubleToString(todayOpenPrice, _Digits) + "\n";
-   comment += "Orders Placed: " + (ordersPlaced ? "Yes" : "No") + "\n";
    comment += "Trading Days: Monday - Friday\n";
    comment += "Trading Hours: " + IntegerToString(InpStartHour) + ":" + 
               StringFormat("%02d", InpStartMinute) + " - " + 
