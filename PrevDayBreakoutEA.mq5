@@ -702,6 +702,21 @@ void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
 {
    string comment = InpOrderComment + "_London";
    
+   // Validate London high/low are calculated and valid
+   if(londonHigh <= 0 || londonLow <= 0 || londonHigh <= londonLow)
+   {
+      Print("London orders not placed: Invalid London high/low values. High: ", londonHigh, " Low: ", londonLow);
+      return;
+   }
+   
+   double currentBid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double currentAsk = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   
+   Print("=== Placing London Orders ===");
+   Print("London High: ", londonHigh, " | London Low: ", londonLow);
+   Print("Current BID: ", currentBid, " | Current ASK: ", currentAsk);
+   Print("Today's Open: ", todayOpenPrice);
+   
    // Check if today's open is above London high - if so, skip buy trade
    if(todayOpenPrice > londonHigh)
    {
@@ -709,8 +724,18 @@ void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
    }
    else
    {
-      // Buy Stop above London high
-      double buyPrice = NormalizeDouble(londonHigh, _Digits);
+      // Buy Stop above London high (add small buffer to ensure it's above the high)
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double buyPrice = NormalizeDouble(londonHigh + point, _Digits); // Add 1 point above high
+      
+      // For Buy Stop, price must be above current ASK
+      if(buyPrice <= currentAsk)
+      {
+         // If price is already at or above London high, place order slightly above current ASK
+         buyPrice = NormalizeDouble(currentAsk + point * 10, _Digits); // 10 points above current ASK
+         Print("London Buy Stop: Price adjusted to ", buyPrice, " (above current ASK ", currentAsk, " since price already at/above London high)");
+      }
+      
       double buySL = NormalizeDouble(buyPrice - slDistance, _Digits);
       double buyTP = NormalizeDouble(buyPrice + tpDistance, _Digits);
       
@@ -719,11 +744,11 @@ void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
       {
          if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("London Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
+            Print("✓ London Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
          }
          else
          {
-            Print("Failed to place London Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+            Print("✗ Failed to place London Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
       else
@@ -739,8 +764,18 @@ void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
    }
    else
    {
-      // Sell Stop below London low
-      double sellPrice = NormalizeDouble(londonLow, _Digits);
+      // Sell Stop below London low (add small buffer to ensure it's below the low)
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double sellPrice = NormalizeDouble(londonLow - point, _Digits); // Subtract 1 point below low
+      
+      // For Sell Stop, price must be below current BID
+      if(sellPrice >= currentBid)
+      {
+         // If price is already at or below London low, place order slightly below current BID
+         sellPrice = NormalizeDouble(currentBid - point * 10, _Digits); // 10 points below current BID
+         Print("London Sell Stop: Price adjusted to ", sellPrice, " (below current BID ", currentBid, " since price already at/below London low)");
+      }
+      
       double sellSL = NormalizeDouble(sellPrice + slDistance, _Digits);
       double sellTP = NormalizeDouble(sellPrice - tpDistance, _Digits);
       
@@ -749,11 +784,11 @@ void PlaceLondonOrders(double lotSize, double slDistance, double tpDistance)
       {
          if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("London Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
+            Print("✓ London Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
          }
          else
          {
-            Print("Failed to place London Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
+            Print("✗ Failed to place London Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
       else
