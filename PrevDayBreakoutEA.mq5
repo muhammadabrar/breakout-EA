@@ -683,10 +683,7 @@ void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
       // Validate SL/TP are correct distance from entry
       if(buySL > 0 && buyTP > 0 && buySL < buyPrice && buyTP > buyPrice)
       {
-         if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment))
-         {
-         }
-      }
+         trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment);
       }
    }
    
@@ -704,10 +701,7 @@ void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
       // Validate SL/TP are correct distance from entry
       if(sellSL > 0 && sellTP > 0 && sellSL > sellPrice && sellTP < sellPrice)
       {
-         if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment))
-         {
-         }
-      }
+         trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment);
       }
    }
 }
