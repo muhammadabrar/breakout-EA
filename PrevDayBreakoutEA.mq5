@@ -194,11 +194,11 @@ void OnTick()
    }
    
    // Calculate current day London session high/low (only on weekdays)
-   // Update continuously during London session
+   // Update continuously during London session, or do final calculation after session ends
    if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH))
    {
-      // Check if we're in or past London session start time
-      if(IsLondonSessionTime())
+      // Calculate during session (updates continuously) or after session ends (final calculation)
+      if(IsLondonSessionTime() || IsLondonSessionEnded())
       {
          CalculateLondonSessionHighLow();
       }
@@ -214,14 +214,21 @@ void OnTick()
       dailyOrdersPlaced = true;
    }
    
-   // Place London orders if ready and London session has started
+   // Place London orders if ready (can be placed during or after London session)
    if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) && 
-      !londonOrdersPlaced && londonCalculated && IsLondonSessionTime())
+      !londonOrdersPlaced && londonCalculated)
    {
-      PlaceLondonOrders(InpLotSize,
-                        InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
-                        InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
-      londonOrdersPlaced = true;
+      // Place orders if London session has started (during or after session)
+      if(IsLondonSessionTime() || IsLondonSessionEnded())
+      {
+         Print("Attempting to place London orders - Calculated: ", londonCalculated, 
+               " | High: ", londonHigh, " | Low: ", londonLow,
+               " | Session Ended: ", IsLondonSessionEnded());
+         PlaceLondonOrders(InpLotSize,
+                           InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
+                           InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
+         londonOrdersPlaced = true;
+      }
    }
    
    // Update combined ordersPlaced flag for backward compatibility
@@ -370,6 +377,35 @@ bool IsLondonSessionTime()
    
    // Check if current time is at or after London session start
    return (currentTime >= londonStart);
+}
+
+//+------------------------------------------------------------------+
+//| Check if London session has ended                                |
+//+------------------------------------------------------------------+
+bool IsLondonSessionEnded()
+{
+   MqlDateTime timeStruct;
+   TimeToStruct(TimeCurrent(), timeStruct);
+   
+   // Get today's date
+   datetime today = StringToTime(IntegerToString(timeStruct.year) + "." + 
+                                  IntegerToString(timeStruct.mon) + "." + 
+                                  IntegerToString(timeStruct.day) + " 00:00");
+   
+   // Calculate London session start and end times for current day
+   datetime londonStart = today + InpLondonStartHour * 3600 + InpLondonStartMinute * 60;
+   datetime londonEnd = today + InpLondonEndHour * 3600 + InpLondonEndMinute * 60;
+   
+   // If London session ends after midnight, adjust
+   if(londonEnd < londonStart)
+   {
+      londonEnd += 86400; // Add 24 hours
+   }
+   
+   datetime currentTime = TimeCurrent();
+   
+   // Check if current time is after London session end
+   return (currentTime > londonEnd);
 }
 
 //+------------------------------------------------------------------+
