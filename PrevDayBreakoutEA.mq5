@@ -214,25 +214,14 @@ void OnTick()
       dailyOrdersPlaced = true;
    }
    
-   // Place London orders if ready (can be placed during or after London session)
+   // Place London orders ONLY AFTER London session has ended
    if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) && 
       !londonOrdersPlaced && londonCalculated)
    {
-      // Debug: Check why orders might not be placing
-      bool sessionStarted = IsLondonSessionTime();
-      bool sessionEnded = IsLondonSessionEnded();
-      
-      Print("London Order Placement Check - Calculated: ", londonCalculated,
-            " | Orders Already Placed: ", londonOrdersPlaced,
-            " | Session Started: ", sessionStarted,
-            " | Session Ended: ", sessionEnded,
-            " | High: ", londonHigh, " | Low: ", londonLow);
-      
-      // Place orders if London session has started (during or after session)
-      // Once calculated, we should always try to place orders
-      if(sessionStarted || sessionEnded)
+      // Only place orders AFTER the London session has ended
+      if(IsLondonSessionEnded())
       {
-         Print("=== Attempting to place London orders ===");
+         Print("=== London session ended - Placing pending orders at High: ", londonHigh, " Low: ", londonLow, " ===");
          PlaceLondonOrders(InpLotSize,
                            InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
                            InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
@@ -266,7 +255,13 @@ void OnTick()
       }
       else
       {
-         Print("London orders not placed: Session has not started yet.");
+         // Session still active - wait for it to end
+         static datetime lastLogTime = 0;
+         if(TimeCurrent() - lastLogTime >= 60) // Log every minute to avoid spam
+         {
+            Print("London session still active - Waiting for session to end before placing orders. High: ", londonHigh, " Low: ", londonLow);
+            lastLogTime = TimeCurrent();
+         }
       }
    }
    
