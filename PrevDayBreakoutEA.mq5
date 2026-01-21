@@ -218,16 +218,55 @@ void OnTick()
    if((InpBreakoutMode == BREAKOUT_LONDON_ONLY || InpBreakoutMode == BREAKOUT_BOTH) && 
       !londonOrdersPlaced && londonCalculated)
    {
+      // Debug: Check why orders might not be placing
+      bool sessionStarted = IsLondonSessionTime();
+      bool sessionEnded = IsLondonSessionEnded();
+      
+      Print("London Order Placement Check - Calculated: ", londonCalculated,
+            " | Orders Already Placed: ", londonOrdersPlaced,
+            " | Session Started: ", sessionStarted,
+            " | Session Ended: ", sessionEnded,
+            " | High: ", londonHigh, " | Low: ", londonLow);
+      
       // Place orders if London session has started (during or after session)
-      if(IsLondonSessionTime() || IsLondonSessionEnded())
+      // Once calculated, we should always try to place orders
+      if(sessionStarted || sessionEnded)
       {
-         Print("Attempting to place London orders - Calculated: ", londonCalculated, 
-               " | High: ", londonHigh, " | Low: ", londonLow,
-               " | Session Ended: ", IsLondonSessionEnded());
+         Print("=== Attempting to place London orders ===");
          PlaceLondonOrders(InpLotSize,
                            InpStopLossPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT),
                            InpTakeProfitPips * GetPipInPoints() * SymbolInfoDouble(_Symbol, SYMBOL_POINT));
-         londonOrdersPlaced = true;
+         
+         // Check if orders were actually placed before setting flag
+         int pendingOrders = 0;
+         for(int i = OrdersTotal() - 1; i >= 0; i--)
+         {
+            if(order.SelectByIndex(i))
+            {
+               if(order.Symbol() == _Symbol && order.Magic() == InpMagicNumber)
+               {
+                  string orderComment = order.Comment();
+                  if(StringFind(orderComment, "_London") >= 0)
+                  {
+                     pendingOrders++;
+                  }
+               }
+            }
+         }
+         
+         if(pendingOrders > 0)
+         {
+            londonOrdersPlaced = true;
+            Print("London orders successfully placed. Count: ", pendingOrders);
+         }
+         else
+         {
+            Print("WARNING: London orders were not placed. Check PlaceLondonOrders() output for errors.");
+         }
+      }
+      else
+      {
+         Print("London orders not placed: Session has not started yet.");
       }
    }
    
