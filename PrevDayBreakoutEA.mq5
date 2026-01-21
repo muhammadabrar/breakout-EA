@@ -112,9 +112,6 @@ int OnInit()
    if(InpConfigureChart)
       ConfigureChartColors();
    
-   Print("Previous Day Breakout EA Initialized");
-   Print("Symbol: ", _Symbol);
-   Print("SL: ", InpStopLossPips, " pips | TP: ", InpTakeProfitPips, " pips");
    
    return(INIT_SUCCEEDED);
 }
@@ -167,7 +164,6 @@ void OnTick()
       {
          CloseAllTrades();
          tradesClosedToday = true;
-         Print("Weekend detected - all trades closed. Trading disabled until Monday.");
       }
       UpdateChartComment();
       return; // Exit early on weekends
@@ -183,7 +179,6 @@ void OnTick()
       TimeToStruct(TimeCurrent(), timeStruct);
       if(timeStruct.day_of_week == 5) // Friday
       {
-         Print("Friday 22:00 - All trades closed. Trading will resume Monday 1:15.");
       }
    }
    
@@ -349,7 +344,6 @@ void CalculatePreviousDayHighLow()
       
       if(startBar < 0 || endBar < 0)
       {
-         Print("Cannot find bars for previous day");
          return;
       }
    }
@@ -376,11 +370,9 @@ void CalculatePreviousDayHighLow()
       if(InpShowLines)
          DrawPrevDayLines();
       
-      Print("Previous day calculated - High: ", prevDayHigh, " | Low: ", prevDayLow);
    }
    else
    {
-      Print("Failed to get previous day high/low");
    }
 }
 
@@ -550,13 +542,11 @@ void GetTodayOpenPrice()
    if(copied > 0)
    {
       todayOpenPrice = open[0];
-      Print("Today's open price: ", todayOpenPrice);
    }
    else
    {
       // Fallback: use current price if daily data not available
       todayOpenPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      Print("Warning: Could not get today's open, using current price: ", todayOpenPrice);
    }
 }
 
@@ -610,8 +600,6 @@ bool IsCloseTime()
 //+------------------------------------------------------------------+
 void CloseAllTrades()
 {
-   Print("=== Closing all trades at close time ===");
-   
    // Close all open positions
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
@@ -619,14 +607,7 @@ void CloseAllTrades()
       {
          if(position.Symbol() == _Symbol && position.Magic() == InpMagicNumber)
          {
-            if(trade.PositionClose(position.Ticket()))
-            {
-               Print("Position closed: ", position.Ticket());
-            }
-            else
-            {
-               Print("Failed to close position: ", position.Ticket(), " Error: ", GetLastError());
-            }
+            trade.PositionClose(position.Ticket());
          }
       }
    }
@@ -638,19 +619,10 @@ void CloseAllTrades()
       {
          if(order.Symbol() == _Symbol && order.Magic() == InpMagicNumber)
          {
-            if(trade.OrderDelete(order.Ticket()))
-            {
-               Print("Pending order deleted: ", order.Ticket());
-            }
-            else
-            {
-               Print("Failed to delete pending order: ", order.Ticket(), " Error: ", GetLastError());
-            }
+            trade.OrderDelete(order.Ticket());
          }
       }
    }
-   
-   Print("All trades closed/deleted");
 }
 
 //+------------------------------------------------------------------+
@@ -676,13 +648,6 @@ void PlaceOrders()
    double tpDistance = InpTakeProfitPips * pipInPoints * point;
    
    // Debug output
-   Print("=== Order Calculation Debug ===");
-   Print("Symbol: ", _Symbol);
-   Print("Digits: ", _Digits);
-   Print("Point: ", point);
-   Print("PipInPoints: ", pipInPoints);
-   Print("SL Pips: ", InpStopLossPips, " | SL Distance: ", slDistance);
-   Print("TP Pips: ", InpTakeProfitPips, " | TP Distance: ", tpDistance);
    
    // Place Daily Breakout Orders
    if(InpBreakoutMode == BREAKOUT_DAILY_ONLY || InpBreakoutMode == BREAKOUT_BOTH)
@@ -707,7 +672,6 @@ void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
    // Check if today's open is above previous day high - if so, skip buy trade
    if(todayOpenPrice > prevDayHigh)
    {
-      Print("Daily Buy trade skipped: Today's open (", todayOpenPrice, ") is above previous day high (", prevDayHigh, ")");
    }
    else
    {
@@ -721,23 +685,14 @@ void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
       {
          if(trade.BuyStop(lotSize, buyPrice, _Symbol, buySL, buyTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("Daily Buy Stop placed at ", buyPrice, " | SL: ", buySL, " (", InpStopLossPips, " pips) | TP: ", buyTP, " (", InpTakeProfitPips, " pips)");
-         }
-         else
-         {
-            Print("Failed to place Daily Buy Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
-      else
-      {
-         Print("Invalid Daily Buy Stop parameters - Price: ", buyPrice, " SL: ", buySL, " TP: ", buyTP);
       }
    }
    
    // Check if today's open is below previous day low - if so, skip sell trade
    if(todayOpenPrice < prevDayLow)
    {
-      Print("Daily Sell trade skipped: Today's open (", todayOpenPrice, ") is below previous day low (", prevDayLow, ")");
    }
    else
    {
@@ -751,16 +706,8 @@ void PlaceDailyOrders(double lotSize, double slDistance, double tpDistance)
       {
          if(trade.SellStop(lotSize, sellPrice, _Symbol, sellSL, sellTP, ORDER_TIME_DAY, 0, comment))
          {
-            Print("Daily Sell Stop placed at ", sellPrice, " | SL: ", sellSL, " (", InpStopLossPips, " pips) | TP: ", sellTP, " (", InpTakeProfitPips, " pips)");
-         }
-         else
-         {
-            Print("Failed to place Daily Sell Stop. Error: ", GetLastError(), " | Code: ", trade.ResultRetcode(), " | Description: ", trade.ResultRetcodeDescription());
          }
       }
-      else
-      {
-         Print("Invalid Daily Sell Stop parameters - Price: ", sellPrice, " SL: ", sellSL, " TP: ", sellTP);
       }
    }
 }
@@ -946,12 +893,10 @@ double GetPipInPoints()
       if(point > 0)
       {
          double pipInPoints = 0.10 / point;  // 0.10 divided by point value
-         Print("XAU/Gold detected: ", symbol, " | Digits: ", digits, " | Point: ", point, " | PipInPoints: ", pipInPoints, " (1 pip = 0.10)");
          return pipInPoints;
       }
       else
       {
-         Print("Warning: Point value is 0 for XAU, using fallback");
          return (digits == 3) ? 100.0 : 10.0; // Fallback: 100 points for 3 digits, 10 points for 2 digits
       }
    }
@@ -967,7 +912,6 @@ double GetPipInPoints()
       }
       else
       {
-         Print("Warning: Point value is 0 for index, using fallback");
          return 1.0; // Fallback
       }
    }
@@ -1039,10 +983,6 @@ void ManageTrailingStops()
             // Log if there's a mismatch
             if(reportedType != posType)
             {
-               Print("WARNING: Position type corrected! Ticket: ", position.Ticket(),
-                     " | Reported Type: ", (reportedType == POSITION_TYPE_BUY ? "BUY" : "SELL"),
-                     " | Corrected Type: ", (posType == POSITION_TYPE_BUY ? "BUY" : "SELL"),
-                     " | Open Price: ", openPrice, " | BID: ", bidPrice);
             }
             
             double currentPrice = bidPrice;  // Use BID for both position types
@@ -1061,19 +1001,6 @@ void ManageTrailingStops()
             
             double profitPips = priceDifference / pipValue;
             
-            // Debug: Log pip calculation details (only once per position to avoid spam)
-            static int lastDebugTicket = 0;
-            if(position.Ticket() != lastDebugTicket || MathAbs(profitPips - InpTrailingStart) < 2.0)
-            {
-               Print("Trailing Debug - Ticket: ", position.Ticket(),
-                     " | Price Diff: ", priceDifference,
-                     " | PipValue: ", pipValue,
-                     " | PipInPoints: ", pipInPoints,
-                     " | Point: ", point,
-                     " | Profit Pips: ", DoubleToString(profitPips, 2),
-                     " | Required: ", InpTrailingStart, " pips");
-               lastDebugTicket = position.Ticket();
-            }
             
             // Check if profit reached trailing start
             if(profitPips >= InpTrailingStart)
@@ -1106,8 +1033,6 @@ void ManageTrailingStops()
                   // For BUY: SL must be below BID by at least minStop
                   if(newSL >= bidPrice - minStop)
                   {
-                     Print("BUY trailing SL too close to market. New SL: ", newSL, 
-                           " | BID: ", bidPrice, " | Min distance: ", minStop);
                      continue;
                   }
                }
@@ -1117,9 +1042,6 @@ void ManageTrailingStops()
                   // Important: Use ASK here because broker will use ASK to trigger SELL SL
                   if(newSL <= askPrice + minStop)
                   {
-                     Print("SELL trailing SL too close to market. New SL: ", newSL, 
-                           " | ASK: ", askPrice, " | Min distance: ", minStop,
-                           " | Required: ", askPrice + minStop);
                      continue;
                   }
                }
@@ -1160,24 +1082,10 @@ void ManageTrailingStops()
                   if(trade.PositionModify(position.Ticket(), normalizedSL, position.TakeProfit()))
                   {
                      string posTypeStr = (posType == POSITION_TYPE_BUY) ? "BUY" : "SELL";
-                     Print("✓ Trailing SL updated for ", posTypeStr, " #", position.Ticket(), 
-                           " | New SL: ", normalizedSL, 
-                           " | Old SL: ", currentSL,
-                           " | BID: ", bidPrice,
-                           " | ASK: ", askPrice,
-                           " | Profit: ", DoubleToString(profitPips, 1), " pips");
                   }
                   else
                   {
                      string posTypeStr = (posType == POSITION_TYPE_BUY) ? "BUY" : "SELL";
-                     Print("✗ Failed to update trailing SL for ", posTypeStr, " #", position.Ticket(), 
-                           " | Error: ", GetLastError(), 
-                           " | Code: ", trade.ResultRetcode(),
-                           " | Description: ", trade.ResultRetcodeDescription(),
-                           " | New SL: ", normalizedSL,
-                           " | Current SL: ", currentSL,
-                           " | BID: ", bidPrice,
-                           " | ASK: ", askPrice);
                   }
                }
                else
@@ -1188,14 +1096,6 @@ void ManageTrailingStops()
                                         (newSL - currentSL) : 
                                         (currentSL - newSL);
                   
-                  Print("Trailing SL not updated for ", posTypeStr, " #", position.Ticket(),
-                        " | Position Type Code: ", (int)posType, " (0=BUY, 1=SELL)",
-                        " | Current SL: ", currentSL,
-                        " | New SL: ", newSL,
-                        " | SL Difference: ", slDifference,
-                        " | Required step: ", trailingStep,
-                        " | Profit: ", DoubleToString(profitPips, 1), " pips",
-                        " | BID: ", bidPrice, " | ASK: ", askPrice);
                }
             }
          }
@@ -1215,7 +1115,6 @@ void DeletePendingOrders()
          if(order.Symbol() == _Symbol && order.Magic() == InpMagicNumber)
          {
             trade.OrderDelete(order.Ticket());
-            Print("Pending order deleted: ", order.Ticket());
          }
       }
    }
@@ -1316,16 +1215,9 @@ void CancelConflictingPendingOrders()
                            else if(orderType == ORDER_TYPE_SELL_STOP) orderTypeStr = "SELL_STOP";
                            else if(orderType == ORDER_TYPE_SELL_LIMIT) orderTypeStr = "SELL_LIMIT";
                            
-                           Print("✓ Conflicting order cancelled: ", orderTypeStr, " at ", DoubleToString(orderPrice, _Digits), 
-                                 " (conflicts with open ", posTypeStr, " position #", position.Ticket(),
-                                 " | Entry: ", DoubleToString(posEntry, _Digits), 
-                                 " | SL: ", DoubleToString(posSL, _Digits), 
-                                 " | TP: ", DoubleToString(posTP, _Digits),
-                                 " | Range: ", DoubleToString(minPrice, _Digits), " - ", DoubleToString(maxPrice, _Digits), ")");
                         }
                         else
                         {
-                           Print("✗ Failed to delete conflicting order: ", order.Ticket(), " Error: ", GetLastError());
                         }
                      }
                   }
