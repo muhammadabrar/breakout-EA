@@ -925,8 +925,9 @@ double GetPipInPoints()
    }
 }
 //+------------------------------------------------------------------+
-//| Manage trailing stops                  | 
-
+//| Manage trailing stops                                            |
+//| NOTE: Trailing is calculated from RANGE LEVEL, not entry price   |
+//| This ensures consistent behavior regardless of fill slippage     |
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
@@ -938,6 +939,7 @@ void ManageTrailingStops()
          {
             double openPrice = position.PriceOpen();
             double currentSL = position.StopLoss();
+            string posComment = position.Comment();
             
             // Get current market prices
             double bidPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -981,16 +983,51 @@ void ManageTrailingStops()
             
             double currentPrice = bidPrice;  // Use BID for both position types
             
-            // Calculate profit in pips
+            // Determine the range level to use for trailing calculation
+            // This is the breakout level (range high for BUY, range low for SELL)
+            // Using range level instead of entry price ensures consistent trailing
+            // regardless of where the order actually fills (slippage)
+            double rangeLevel = openPrice; // Default to open price if we can't determine range
+            
+            // Check if this is a Daily or London order based on comment
+            bool isDailyOrder = (StringFind(posComment, "_Daily") >= 0);
+            bool isLondonOrder = (StringFind(posComment, "_London") >= 0);
+            
+            if(posType == POSITION_TYPE_BUY)
+            {
+               // BUY orders are placed at range HIGH
+               if(isDailyOrder && prevDayHigh > 0)
+               {
+                  rangeLevel = prevDayHigh;
+               }
+               else if(isLondonOrder && londonHigh > 0)
+               {
+                  rangeLevel = londonHigh;
+               }
+            }
+            else // POSITION_TYPE_SELL
+            {
+               // SELL orders are placed at range LOW
+               if(isDailyOrder && prevDayLow > 0)
+               {
+                  rangeLevel = prevDayLow;
+               }
+               else if(isLondonOrder && londonLow > 0)
+               {
+                  rangeLevel = londonLow;
+               }
+            }
+            
+            // Calculate profit in pips FROM THE RANGE LEVEL (not entry price)
             // pipValue = price value of 1 pip (e.g., 0.10 for XAU, 1.0 for indices, 0.0001 for forex)
             double priceDifference;
             if(posType == POSITION_TYPE_BUY)
             {
-               priceDifference = currentPrice - openPrice;
+               priceDifference = currentPrice - rangeLevel;
             }
             else // POSITION_TYPE_SELL
             {
-               priceDifference = openPrice - currentPrice;
+               priceDifference = rangeLevel - currentPrice;
             }
             
             double profitPips = priceDifference / pipValue;
