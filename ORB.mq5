@@ -249,24 +249,47 @@ void SetOpeningRange()
     
     g_rangeStartTime = StructToTime(dt);
     
+    // Calculate when the range ENDS (start time + period)
     int rangePeriodSeconds = PeriodSeconds(InpORTimeframe);
     g_rangeEndTime = g_rangeStartTime + rangePeriodSeconds;
     
+    // Check if current time is past the range END time
     if(TimeCurrent() < g_rangeEndTime)
     {
+        Print("⏳ Waiting for opening range to complete. Ends at: ", TimeToString(g_rangeEndTime));
+        return; // Wait for range period to complete
+    }
+    
+    // Get the number of bars in the range period
+    int barsToCopy = 0;
+    if(InpORTimeframe == PERIOD_M5)
+        barsToCopy = (int)(rangePeriodSeconds / PeriodSeconds(PERIOD_M5));
+    else if(InpORTimeframe == PERIOD_M15)
+        barsToCopy = (int)(rangePeriodSeconds / PeriodSeconds(PERIOD_M15));
+    else if(InpORTimeframe == PERIOD_H1)
+        barsToCopy = (int)(rangePeriodSeconds / PeriodSeconds(PERIOD_H1));
+    
+    // Get the bar index of the start time
+    int startBarIndex = iBarShift(_Symbol, InpORTimeframe, g_rangeStartTime);
+    
+    if(startBarIndex < 0)
+    {
+        Print("❌ Cannot find opening range start bar");
         return;
     }
     
+    // Copy high and low data from the range period
     double high[], low[];
-    int copied_high = CopyHigh(_Symbol, InpORTimeframe, g_rangeStartTime, g_rangeEndTime, high);
-    int copied_low = CopyLow(_Symbol, InpORTimeframe, g_rangeStartTime, g_rangeEndTime, low);
+    int copied_high = CopyHigh(_Symbol, InpORTimeframe, startBarIndex, barsToCopy, high);
+    int copied_low = CopyLow(_Symbol, InpORTimeframe, startBarIndex, barsToCopy, low);
     
     if(copied_high <= 0 || copied_low <= 0)
     {
-        Print("Failed to copy price data for opening range");
+        Print("Failed to copy price data for opening range. Copied: ", copied_high, " bars");
         return;
     }
     
+    // Find the highest high and lowest low in the range
     g_rangeHigh = high[ArrayMaximum(high)];
     g_rangeLow = low[ArrayMinimum(low)];
     
@@ -275,7 +298,8 @@ void SetOpeningRange()
     DrawRangeLines();
     MarkOpeningRangeCandles();
     
-    Print("✅ Opening Range set: High=", g_rangeHigh, " Low=", g_rangeLow);
+    Print("✅ Opening Range set from ", TimeToString(g_rangeStartTime), " to ", TimeToString(g_rangeEndTime));
+    Print("   High: ", g_rangeHigh, " | Low: ", g_rangeLow);
 }
 
 //+------------------------------------------------------------------+
@@ -424,13 +448,23 @@ void CheckForBreakout()
 //+------------------------------------------------------------------+
 bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
 {
-    // Get CURRENT market price for immediate execution
-    double price = (orderType == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    // Refresh tick data to get the LATEST price
+    MqlTick latest_tick;
+    if(!SymbolInfoTick(_Symbol, latest_tick))
+    {
+        Print("❌ Failed to get current tick data");
+        return false;
+    }
+    
+    // Use the CURRENT LIVE price at this exact moment
+    double price = (orderType == ORDER_TYPE_BUY) ? latest_tick.ask : latest_tick.bid;
+    
+    Print("💰 CURRENT LIVE PRICE: ", (orderType == ORDER_TYPE_BUY ? "Ask" : "Bid"), " = ", price);
     
     double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
     int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
     
-    // Calculate Stop Loss using the breakout candle's high/low
+    // Calculate Stop Loss using the breakout candle's high/low (for SL placement only)
     double stopLoss = 0.0;
     if(orderType == ORDER_TYPE_BUY)
     {
@@ -443,7 +477,7 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
     
     stopLoss = NormalizeDouble(stopLoss, digits);
     
-    // Calculate lot size
+    // Calculate lot size based on CURRENT price and SL
     double lotSize = CalculateLotSize(price, stopLoss);
     
     if(lotSize <= 0)
@@ -452,10 +486,10 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
         return false;
     }
     
-    // Store SL distance
+    // Store SL distance based on CURRENT PRICE (not breakout candle)
     g_slDistance = MathAbs(price - stopLoss);
     
-    // Calculate TP at final RR
+    // Calculate TP at final RR from CURRENT PRICE
     double takeProfit = 0.0;
     if(InpFinalTPRR > 0)
     {
@@ -467,35 +501,44 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
         takeProfit = NormalizeDouble(takeProfit, digits);
     }
     
-    Print("📋 Trade Details:");
-    Print("   Entry: ", price, " (CURRENT MARKET PRICE)");
-    Print("   SL: ", stopLoss, " (", g_slDistance, " pts)");
-    Print("   TP: ", takeProfit, " (", (g_slDistance * InpFinalTPRR), " pts)");
-    Print("   Lot: ", lotSize);
+    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    Print("📋 TRADE EXECUTION DETAILS:");
+    Print("   Type: ", (orderType == ORDER_TYPE_BUY ? "BUY" : "SELL"));
+    Print("   Entry Price: ", price, " ← CURRENT MARKET PRICE");
+    Print("   Stop Loss: ", stopLoss, " (", DoubleToString(g_slDistance / pointSize, 1), " points away)");
+    Print("   Take Profit: ", takeProfit, " (", DoubleToString((g_slDistance * InpFinalTPRR) / pointSize, 1), " points away)");
+    Print("   Lot Size: ", lotSize);
+    Print("   Risk: $", InpRiskAmount);
+    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // Execute trade
+    // Execute trade at CURRENT MARKET PRICE
     bool result = false;
     if(orderType == ORDER_TYPE_BUY)
     {
-        result = trade.Buy(lotSize, _Symbol, price, stopLoss, takeProfit, "ORB Buy");
+        result = trade.Buy(lotSize, _Symbol, 0, stopLoss, takeProfit, "ORB Buy");
     }
     else
     {
-        result = trade.Sell(lotSize, _Symbol, price, stopLoss, takeProfit, "ORB Sell");
+        result = trade.Sell(lotSize, _Symbol, 0, stopLoss, takeProfit, "ORB Sell");
     }
     
     if(result)
     {
-        Sleep(50);
+        Sleep(100); // Give time for position to register
         
         if(PositionSelect(_Symbol))
         {
             g_positionTicket = PositionGetInteger(POSITION_TICKET);
             g_entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
             g_originalSL = stopLoss;
-            g_slDistance = MathAbs(g_entryPrice - stopLoss);  // Recalc with actual fill
             
-            Print("✅ Position opened! Ticket: ", g_positionTicket, " | Filled at: ", g_entryPrice);
+            // Recalculate SL distance with ACTUAL fill price
+            g_slDistance = MathAbs(g_entryPrice - stopLoss);
+            
+            Print("✅✅✅ POSITION OPENED ✅✅✅");
+            Print("   Ticket: ", g_positionTicket);
+            Print("   Actual Fill: ", g_entryPrice);
+            Print("   Slippage: ", DoubleToString((g_entryPrice - price) / pointSize, 1), " points");
             
             g_tradeToday = true;
             g_lastTradeDate = TimeCurrent();
@@ -510,7 +553,9 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
     }
     else
     {
-        Print("❌ Trade failed: ", trade.ResultRetcodeDescription());
+        Print("❌ TRADE FAILED: ", trade.ResultRetcodeDescription());
+        Print("   Return Code: ", trade.ResultRetcode());
+        Print("   Last Error: ", GetLastError());
         return false;
     }
 }
