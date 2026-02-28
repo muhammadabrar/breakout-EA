@@ -1,11 +1,12 @@
+
 //+------------------------------------------------------------------+
 //|                                          OpenRangeBreakout.mq5   |
 //|                                   Professional ORB Strategy EA    |
-//|                                                          v1.4     |
+//|                                                          v1.5     |
 //+------------------------------------------------------------------+
 #property copyright "Open Range Breakout EA"
 #property link      ""
-#property version   "1.40"
+#property version   "1.50"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -18,14 +19,23 @@
 input group "=== Opening Range Settings ==="
 input int InpMarketOpenHour = 9;                    // Market Open Hour (24h format)
 input int InpMarketOpenMinute = 30;                  // Market Open Minute
-input ENUM_TIMEFRAMES InpORTimeframe = PERIOD_M15;   // Opening Range Timeframe (M5/M15/H1)
+input ENUM_TIMEFRAMES InpORTimeframe = PERIOD_M15;   // Opening Range Timeframe
 
 // Breakout Settings
 input group "=== Breakout Settings ==="
-input ENUM_TIMEFRAMES InpBreakoutTimeframe = PERIOD_M1; // Breakout Candle Timeframe (M1/M5)
+input ENUM_TIMEFRAMES InpBreakoutTimeframe = PERIOD_M1; // Breakout Candle Timeframe
+
+// Stop Loss Placement Options
+enum ENUM_SL_TYPE
+{
+    SL_BREAKOUT_CANDLE = 0,    // Breakout Candle High/Low
+    SL_MID_RANGE = 1,           // Middle of Opening Range
+    SL_OPPOSITE_RANGE = 2       // Opposite Side of Range
+};
 
 // Stop Loss Settings
 input group "=== Stop Loss & TP Settings ==="
+input ENUM_SL_TYPE InpSLPlacement = SL_BREAKOUT_CANDLE;  // Stop Loss Placement Method
 input double InpSLBufferPoints = 5.0;                // Stop Loss Buffer (points)
 input bool InpEnablePartialClose = true;             // Enable Partial Close at 1:1
 input bool InpEnableBreakeven = true;                // Move SL to Breakeven at 30% Profit
@@ -160,17 +170,12 @@ bool ValidateInputs()
         return false;
     }
     
-    if(InpORTimeframe != PERIOD_M5 && InpORTimeframe != PERIOD_M15 && InpORTimeframe != PERIOD_H1)
-    {
-        Print("Invalid Opening Range timeframe. Use M5, M15, or H1");
-        return false;
-    }
-    
-    if(InpBreakoutTimeframe != PERIOD_M1 && InpBreakoutTimeframe != PERIOD_M5)
-    {
-        Print("Invalid Breakout timeframe. Use M1 or M5");
-        return false;
-    }
+    // Timeframe validation removed - allow any timeframe
+    Print("✅ Inputs validated successfully");
+    Print("   Opening Range TF: ", EnumToString(InpORTimeframe));
+    Print("   Breakout TF: ", EnumToString(InpBreakoutTimeframe));
+    Print("   SL Placement: ", (InpSLPlacement == SL_BREAKOUT_CANDLE ? "Breakout Candle" : 
+                                InpSLPlacement == SL_MID_RANGE ? "Mid Range" : "Opposite Range"));
     
     return true;
 }
@@ -464,15 +469,54 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
     double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
     int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
     
-    // Calculate Stop Loss using the breakout candle's high/low (for SL placement only)
+    // Calculate Stop Loss based on selected placement method
     double stopLoss = 0.0;
-    if(orderType == ORDER_TYPE_BUY)
+    string slMethod = "";
+    
+    switch(InpSLPlacement)
     {
-        stopLoss = slReference - (InpSLBufferPoints * pointSize);
-    }
-    else
-    {
-        stopLoss = slReference + (InpSLBufferPoints * pointSize);
+        case SL_BREAKOUT_CANDLE:
+            // Option 1: Use breakout candle high/low
+            if(orderType == ORDER_TYPE_BUY)
+            {
+                stopLoss = slReference - (InpSLBufferPoints * pointSize);
+                slMethod = "Breakout Candle Low";
+            }
+            else
+            {
+                stopLoss = slReference + (InpSLBufferPoints * pointSize);
+                slMethod = "Breakout Candle High";
+            }
+            break;
+            
+        case SL_MID_RANGE:
+            // Option 2: Use middle of opening range
+            double midRange = (g_rangeHigh + g_rangeLow) / 2.0;
+            if(orderType == ORDER_TYPE_BUY)
+            {
+                stopLoss = midRange - (InpSLBufferPoints * pointSize);
+                slMethod = "Mid Range";
+            }
+            else
+            {
+                stopLoss = midRange + (InpSLBufferPoints * pointSize);
+                slMethod = "Mid Range";
+            }
+            break;
+            
+        case SL_OPPOSITE_RANGE:
+            // Option 3: Use opposite side of range
+            if(orderType == ORDER_TYPE_BUY)
+            {
+                stopLoss = g_rangeLow - (InpSLBufferPoints * pointSize);
+                slMethod = "Range Low (Opposite Side)";
+            }
+            else
+            {
+                stopLoss = g_rangeHigh + (InpSLBufferPoints * pointSize);
+                slMethod = "Range High (Opposite Side)";
+            }
+            break;
     }
     
     stopLoss = NormalizeDouble(stopLoss, digits);
@@ -505,6 +549,7 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
     Print("📋 TRADE EXECUTION DETAILS:");
     Print("   Type: ", (orderType == ORDER_TYPE_BUY ? "BUY" : "SELL"));
     Print("   Entry Price: ", price, " ← CURRENT MARKET PRICE");
+    Print("   SL Method: ", slMethod);
     Print("   Stop Loss: ", stopLoss, " (", DoubleToString(g_slDistance / pointSize, 1), " points away)");
     Print("   Take Profit: ", takeProfit, " (", DoubleToString((g_slDistance * InpFinalTPRR) / pointSize, 1), " points away)");
     Print("   Lot Size: ", lotSize);
