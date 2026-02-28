@@ -1,12 +1,11 @@
-
 //+------------------------------------------------------------------+
 //|                                          OpenRangeBreakout.mq5   |
 //|                                   Professional ORB Strategy EA    |
-//|                                                          v1.5     |
+//|                                                          v1.6     |
 //+------------------------------------------------------------------+
 #property copyright "Open Range Breakout EA"
 #property link      ""
-#property version   "1.50"
+#property version   "1.60"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -24,6 +23,8 @@ input ENUM_TIMEFRAMES InpORTimeframe = PERIOD_M15;   // Opening Range Timeframe
 // Breakout Settings
 input group "=== Breakout Settings ==="
 input ENUM_TIMEFRAMES InpBreakoutTimeframe = PERIOD_M1; // Breakout Candle Timeframe
+input bool InpRequireRetest = false;                    // Require Retest & Confirmation
+input int InpRetestBars = 10;                           // Max Bars to Wait for Retest
 
 // Stop Loss Placement Options
 enum ENUM_SL_TYPE
@@ -44,6 +45,16 @@ input double InpFinalTPRR = 2.0;                     // Final Take Profit at 1:2
 // Risk Management
 input group "=== Risk Management ==="
 input double InpRiskAmount = 100.0;                  // Risk Amount per Trade ($)
+
+// Trading Days
+input group "=== Trading Days ==="
+input bool InpTradeMonday = true;                    // Trade on Monday
+input bool InpTradeTuesday = true;                   // Trade on Tuesday
+input bool InpTradeWednesday = true;                 // Trade on Wednesday
+input bool InpTradeThursday = true;                  // Trade on Thursday
+input bool InpTradeFriday = true;                    // Trade on Friday
+input bool InpTradeSaturday = false;                 // Trade on Saturday
+input bool InpTradeSunday = false;                   // Trade on Sunday
 
 // Display Settings
 input group "=== Display Settings ==="
@@ -76,6 +87,14 @@ double g_slDistance = 0.0;
 bool g_partialClosed = false;
 bool g_movedToBreakeven = false;
 datetime g_lastCheckedBar = 0;
+
+// Retest tracking
+bool g_waitingForRetest = false;
+bool g_isBullishBreakout = false;
+datetime g_breakoutTime = 0;
+int g_barsAfterBreakout = 0;
+double g_confirmationCandleLow = 0.0;  // For SL placement after confirmation
+double g_confirmationCandleHigh = 0.0;
 
 // Object Names
 const string OBJ_RANGE_HIGH = "OR_High";
@@ -125,6 +144,32 @@ void OnTick()
         ResetDaily();
     }
     
+    // Check if today is a trading day
+    if(!IsTradingDay())
+    {
+        // Not a trading day - skip all trading logic
+        static bool printedOnce = false;
+        if(!printedOnce)
+        {
+            MqlDateTime dt;
+            TimeToStruct(TimeCurrent(), dt);
+            string dayName = "";
+            switch(dt.day_of_week)
+            {
+                case 0: dayName = "Sunday"; break;
+                case 1: dayName = "Monday"; break;
+                case 2: dayName = "Tuesday"; break;
+                case 3: dayName = "Wednesday"; break;
+                case 4: dayName = "Thursday"; break;
+                case 5: dayName = "Friday"; break;
+                case 6: dayName = "Saturday"; break;
+            }
+            Print("⏸️ Trading disabled for ", dayName, ". EA is paused.");
+            printedOnce = true;
+        }
+        return;
+    }
+    
     // Define opening range if not set
     if(!g_rangeSet && IsTimeToSetRange())
     {
@@ -134,7 +179,16 @@ void OnTick()
     // Check for breakout if range is set and no trade taken today
     if(g_rangeSet && !g_tradeToday)
     {
-        CheckForBreakout();
+        if(!g_waitingForRetest)
+        {
+            // Check for initial breakout
+            CheckForBreakout();
+        }
+        else
+        {
+            // Waiting for retest and confirmation
+            CheckForRetestConfirmation();
+        }
     }
     
     // Manage active position
@@ -170,6 +224,14 @@ bool ValidateInputs()
         return false;
     }
     
+    // Check if at least one trading day is selected
+    if(!InpTradeMonday && !InpTradeTuesday && !InpTradeWednesday && 
+       !InpTradeThursday && !InpTradeFriday && !InpTradeSaturday && !InpTradeSunday)
+    {
+        Print("❌ ERROR: At least one trading day must be selected!");
+        return false;
+    }
+    
     // Timeframe validation removed - allow any timeframe
     Print("✅ Inputs validated successfully");
     Print("   Opening Range TF: ", EnumToString(InpORTimeframe));
@@ -177,7 +239,42 @@ bool ValidateInputs()
     Print("   SL Placement: ", (InpSLPlacement == SL_BREAKOUT_CANDLE ? "Breakout Candle" : 
                                 InpSLPlacement == SL_MID_RANGE ? "Mid Range" : "Opposite Range"));
     
+    // Print active trading days
+    string tradingDays = "   Trading Days: ";
+    if(InpTradeMonday) tradingDays += "Mon ";
+    if(InpTradeTuesday) tradingDays += "Tue ";
+    if(InpTradeWednesday) tradingDays += "Wed ";
+    if(InpTradeThursday) tradingDays += "Thu ";
+    if(InpTradeFriday) tradingDays += "Fri ";
+    if(InpTradeSaturday) tradingDays += "Sat ";
+    if(InpTradeSunday) tradingDays += "Sun ";
+    Print(tradingDays);
+    
     return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check if today is a trading day                                   |
+//+------------------------------------------------------------------+
+bool IsTradingDay()
+{
+    MqlDateTime dt;
+    TimeToStruct(TimeCurrent(), dt);
+    
+    // dt.day_of_week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+    
+    switch(dt.day_of_week)
+    {
+        case 0: return InpTradeSunday;
+        case 1: return InpTradeMonday;
+        case 2: return InpTradeTuesday;
+        case 3: return InpTradeWednesday;
+        case 4: return InpTradeThursday;
+        case 5: return InpTradeFriday;
+        case 6: return InpTradeSaturday;
+    }
+    
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -217,6 +314,14 @@ void ResetDaily()
     g_partialClosed = false;
     g_movedToBreakeven = false;
     g_lastCheckedBar = 0;
+    
+    // Reset retest variables
+    g_waitingForRetest = false;
+    g_isBullishBreakout = false;
+    g_breakoutTime = 0;
+    g_barsAfterBreakout = 0;
+    g_confirmationCandleLow = 0.0;
+    g_confirmationCandleHigh = 0.0;
     
     ObjectDelete(0, OBJ_RANGE_HIGH);
     ObjectDelete(0, OBJ_RANGE_LOW);
@@ -394,6 +499,155 @@ void MarkOpeningRangeCandles()
 }
 
 //+------------------------------------------------------------------+
+//| Detect Bullish Engulfing Pattern                                  |
+//+------------------------------------------------------------------+
+bool IsBullishEngulfing(int barIndex = 1)
+{
+    double open[], close[], high[], low[];
+    
+    // Get current candle (barIndex) and previous candle (barIndex + 1)
+    int copied = CopyOpen(_Symbol, InpBreakoutTimeframe, barIndex, 2, open);
+    CopyClose(_Symbol, InpBreakoutTimeframe, barIndex, 2, close);
+    CopyHigh(_Symbol, InpBreakoutTimeframe, barIndex, 2, high);
+    CopyLow(_Symbol, InpBreakoutTimeframe, barIndex, 2, low);
+    
+    if(copied < 2) return false;
+    
+    // Previous candle (index 1 in array)
+    double prevOpen = open[1];
+    double prevClose = close[1];
+    bool prevBearish = prevClose < prevOpen;
+    
+    // Current candle (index 0 in array)
+    double currOpen = open[0];
+    double currClose = close[0];
+    bool currBullish = currClose > currOpen;
+    
+    // Bullish Engulfing: Previous bearish, current bullish, current body engulfs previous
+    if(prevBearish && currBullish)
+    {
+        if(currOpen <= prevClose && currClose >= prevOpen)
+        {
+            Print("📊 Bullish Engulfing detected: Prev[", prevOpen, "-", prevClose, "] Curr[", currOpen, "-", currClose, "]");
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect Hammer Pattern                                             |
+//+------------------------------------------------------------------+
+bool IsHammer(int barIndex = 1)
+{
+    double open[], close[], high[], low[];
+    
+    int copied = CopyOpen(_Symbol, InpBreakoutTimeframe, barIndex, 1, open);
+    CopyClose(_Symbol, InpBreakoutTimeframe, barIndex, 1, close);
+    CopyHigh(_Symbol, InpBreakoutTimeframe, barIndex, 1, high);
+    CopyLow(_Symbol, InpBreakoutTimeframe, barIndex, 1, low);
+    
+    if(copied < 1) return false;
+    
+    double candleOpen = open[0];
+    double candleClose = close[0];
+    double candleHigh = high[0];
+    double candleLow = low[0];
+    
+    double body = MathAbs(candleClose - candleOpen);
+    double totalRange = candleHigh - candleLow;
+    double lowerWick = MathMin(candleOpen, candleClose) - candleLow;
+    double upperWick = candleHigh - MathMax(candleOpen, candleClose);
+    
+    // Hammer: Small body, long lower wick (2x body), small upper wick
+    if(totalRange > 0 && body > 0)
+    {
+        if(lowerWick >= body * 2.0 && upperWick <= body * 0.5)
+        {
+            Print("📊 Hammer detected: Body=", body, " Lower Wick=", lowerWick, " Upper Wick=", upperWick);
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect Bearish Engulfing Pattern                                  |
+//+------------------------------------------------------------------+
+bool IsBearishEngulfing(int barIndex = 1)
+{
+    double open[], close[], high[], low[];
+    
+    int copied = CopyOpen(_Symbol, InpBreakoutTimeframe, barIndex, 2, open);
+    CopyClose(_Symbol, InpBreakoutTimeframe, barIndex, 2, close);
+    CopyHigh(_Symbol, InpBreakoutTimeframe, barIndex, 2, high);
+    CopyLow(_Symbol, InpBreakoutTimeframe, barIndex, 2, low);
+    
+    if(copied < 2) return false;
+    
+    // Previous candle (index 1 in array)
+    double prevOpen = open[1];
+    double prevClose = close[1];
+    bool prevBullish = prevClose > prevOpen;
+    
+    // Current candle (index 0 in array)
+    double currOpen = open[0];
+    double currClose = close[0];
+    bool currBearish = currClose < currOpen;
+    
+    // Bearish Engulfing: Previous bullish, current bearish, current body engulfs previous
+    if(prevBullish && currBearish)
+    {
+        if(currOpen >= prevClose && currClose <= prevOpen)
+        {
+            Print("📊 Bearish Engulfing detected: Prev[", prevOpen, "-", prevClose, "] Curr[", currOpen, "-", currClose, "]");
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect Shooting Star Pattern                                      |
+//+------------------------------------------------------------------+
+bool IsShootingStar(int barIndex = 1)
+{
+    double open[], close[], high[], low[];
+    
+    int copied = CopyOpen(_Symbol, InpBreakoutTimeframe, barIndex, 1, open);
+    CopyClose(_Symbol, InpBreakoutTimeframe, barIndex, 1, close);
+    CopyHigh(_Symbol, InpBreakoutTimeframe, barIndex, 1, high);
+    CopyLow(_Symbol, InpBreakoutTimeframe, barIndex, 1, low);
+    
+    if(copied < 1) return false;
+    
+    double candleOpen = open[0];
+    double candleClose = close[0];
+    double candleHigh = high[0];
+    double candleLow = low[0];
+    
+    double body = MathAbs(candleClose - candleOpen);
+    double totalRange = candleHigh - candleLow;
+    double upperWick = candleHigh - MathMax(candleOpen, candleClose);
+    double lowerWick = MathMin(candleOpen, candleClose) - candleLow;
+    
+    // Shooting Star: Small body, long upper wick (2x body), small lower wick
+    if(totalRange > 0 && body > 0)
+    {
+        if(upperWick >= body * 2.0 && lowerWick <= body * 0.5)
+        {
+            Print("📊 Shooting Star detected: Body=", body, " Upper Wick=", upperWick, " Lower Wick=", lowerWick);
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
 //| Check for Breakout                                                |
 //+------------------------------------------------------------------+
 void CheckForBreakout()
@@ -428,22 +682,166 @@ void CheckForBreakout()
     if(lastClose > g_rangeHigh)
     {
         Print("🚀 BULLISH BREAKOUT! Candle closed at ", lastClose, " (above ", g_rangeHigh, ")");
-        Print("⚡ Opening BUY position at CURRENT MARKET PRICE");
         
-        if(ExecuteTrade(ORDER_TYPE_BUY, candleLow))
+        if(InpRequireRetest)
         {
+            // Wait for retest and confirmation
+            g_waitingForRetest = true;
+            g_isBullishBreakout = true;
+            g_breakoutTime = TimeCurrent();
+            g_barsAfterBreakout = 0;
+            Print("⏳ Retest mode enabled - Waiting for pullback to ", g_rangeHigh, " and bullish confirmation");
             MarkBreakoutCandle(true);
+        }
+        else
+        {
+            // Immediate entry (original behavior)
+            Print("⚡ Opening BUY position at CURRENT MARKET PRICE");
+            if(ExecuteTrade(ORDER_TYPE_BUY, candleLow))
+            {
+                MarkBreakoutCandle(true);
+            }
         }
     }
     // Bearish breakout - candle CLOSED below range
     else if(lastClose < g_rangeLow)
     {
         Print("📉 BEARISH BREAKOUT! Candle closed at ", lastClose, " (below ", g_rangeLow, ")");
-        Print("⚡ Opening SELL position at CURRENT MARKET PRICE");
         
-        if(ExecuteTrade(ORDER_TYPE_SELL, candleHigh))
+        if(InpRequireRetest)
         {
+            // Wait for retest and confirmation
+            g_waitingForRetest = true;
+            g_isBullishBreakout = false;
+            g_breakoutTime = TimeCurrent();
+            g_barsAfterBreakout = 0;
+            Print("⏳ Retest mode enabled - Waiting for pullback to ", g_rangeLow, " and bearish confirmation");
             MarkBreakoutCandle(false);
+        }
+        else
+        {
+            // Immediate entry (original behavior)
+            Print("⚡ Opening SELL position at CURRENT MARKET PRICE");
+            if(ExecuteTrade(ORDER_TYPE_SELL, candleHigh))
+            {
+                MarkBreakoutCandle(false);
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check for Retest and Confirmation                                 |
+//+------------------------------------------------------------------+
+void CheckForRetestConfirmation()
+{
+    datetime currentBarTime = iTime(_Symbol, InpBreakoutTimeframe, 0);
+    
+    if(currentBarTime == g_lastCheckedBar)
+        return;
+    
+    g_lastCheckedBar = currentBarTime;
+    g_barsAfterBreakout++;
+    
+    // Timeout check - waited too long
+    if(g_barsAfterBreakout > InpRetestBars)
+    {
+        Print("⏰ Retest timeout - ", InpRetestBars, " bars passed without confirmation. Resetting.");
+        g_waitingForRetest = false;
+        g_barsAfterBreakout = 0;
+        return;
+    }
+    
+    // Get current candle data
+    double close[], high[], low[];
+    int copied = CopyClose(_Symbol, InpBreakoutTimeframe, 1, 1, close);
+    int copied_high = CopyHigh(_Symbol, InpBreakoutTimeframe, 1, 1, high);
+    int copied_low = CopyLow(_Symbol, InpBreakoutTimeframe, 1, 1, low);
+    
+    if(copied <= 0) return;
+    
+    double lastClose = close[0];
+    double candleHigh = high[0];
+    double candleLow = low[0];
+    
+    if(g_isBullishBreakout)
+    {
+        // Looking for BULLISH confirmation after retest
+        // Check if price retested the breakout level (range high)
+        bool retested = (candleLow <= g_rangeHigh + (10 * _Point)); // Within 10 points of range high
+        
+        if(retested)
+        {
+            Print("✅ Retest detected! Low: ", candleLow, " touched ", g_rangeHigh);
+            
+            // Check for bullish confirmation patterns
+            bool bullishEngulfing = IsBullishEngulfing(1);
+            bool hammer = IsHammer(1);
+            
+            if(bullishEngulfing || hammer)
+            {
+                string pattern = bullishEngulfing ? "Bullish Engulfing" : "Hammer";
+                Print("🎯 CONFIRMATION: ", pattern, " pattern detected!");
+                Print("⚡ Opening BUY position with confirmation");
+                
+                // Store confirmation candle for SL placement
+                g_confirmationCandleLow = candleLow;
+                g_confirmationCandleHigh = candleHigh;
+                
+                // Execute trade with confirmation candle low as SL reference
+                if(ExecuteTrade(ORDER_TYPE_BUY, g_confirmationCandleLow))
+                {
+                    g_waitingForRetest = false;
+                }
+            }
+            else
+            {
+                Print("⏳ Retest occurred but no bullish pattern yet. Waiting... (Bar ", g_barsAfterBreakout, "/", InpRetestBars, ")");
+            }
+        }
+        else
+        {
+            Print("⏳ Waiting for retest of ", g_rangeHigh, " | Current Low: ", candleLow, " (Bar ", g_barsAfterBreakout, "/", InpRetestBars, ")");
+        }
+    }
+    else
+    {
+        // Looking for BEARISH confirmation after retest
+        // Check if price retested the breakout level (range low)
+        bool retested = (candleHigh >= g_rangeLow - (10 * _Point)); // Within 10 points of range low
+        
+        if(retested)
+        {
+            Print("✅ Retest detected! High: ", candleHigh, " touched ", g_rangeLow);
+            
+            // Check for bearish confirmation patterns
+            bool bearishEngulfing = IsBearishEngulfing(1);
+            bool shootingStar = IsShootingStar(1);
+            
+            if(bearishEngulfing || shootingStar)
+            {
+                string pattern = bearishEngulfing ? "Bearish Engulfing" : "Shooting Star";
+                Print("🎯 CONFIRMATION: ", pattern, " pattern detected!");
+                Print("⚡ Opening SELL position with confirmation");
+                
+                // Store confirmation candle for SL placement
+                g_confirmationCandleLow = candleLow;
+                g_confirmationCandleHigh = candleHigh;
+                
+                // Execute trade with confirmation candle high as SL reference
+                if(ExecuteTrade(ORDER_TYPE_SELL, g_confirmationCandleHigh))
+                {
+                    g_waitingForRetest = false;
+                }
+            }
+            else
+            {
+                Print("⏳ Retest occurred but no bearish pattern yet. Waiting... (Bar ", g_barsAfterBreakout, "/", InpRetestBars, ")");
+            }
+        }
+        else
+        {
+            Print("⏳ Waiting for retest of ", g_rangeLow, " | Current High: ", candleHigh, " (Bar ", g_barsAfterBreakout, "/", InpRetestBars, ")");
         }
     }
 }
@@ -476,6 +874,7 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
     switch(InpSLPlacement)
     {
         case SL_BREAKOUT_CANDLE:
+        {
             // Option 1: Use breakout candle high/low
             if(orderType == ORDER_TYPE_BUY)
             {
@@ -488,8 +887,10 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
                 slMethod = "Breakout Candle High";
             }
             break;
+        }
             
         case SL_MID_RANGE:
+        {
             // Option 2: Use middle of opening range
             double midRange = (g_rangeHigh + g_rangeLow) / 2.0;
             if(orderType == ORDER_TYPE_BUY)
@@ -503,8 +904,10 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
                 slMethod = "Mid Range";
             }
             break;
+        }
             
         case SL_OPPOSITE_RANGE:
+        {
             // Option 3: Use opposite side of range
             if(orderType == ORDER_TYPE_BUY)
             {
@@ -517,6 +920,7 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slReference)
                 slMethod = "Range High (Opposite Side)";
             }
             break;
+        }
     }
     
     stopLoss = NormalizeDouble(stopLoss, digits);
@@ -800,16 +1204,36 @@ void UpdateInfoBox()
         default: breakoutTF = "Unknown";
     }
     
-    string infoText = "ORB EA v1.4 | Range: " + orTF + " | Breakout: " + breakoutTF + " | Risk: $" + DoubleToString(InpRiskAmount, 0);
+    string infoText = "ORB EA v1.6 | Range: " + orTF + " | Breakout: " + breakoutTF;
     
-    if(g_rangeSet)
+    if(InpRequireRetest)
     {
-        infoText += " | H: " + DoubleToString(g_rangeHigh, _Digits) + " L: " + DoubleToString(g_rangeLow, _Digits);
+        infoText += " | RETEST MODE";
     }
     
-    if(g_tradeToday)
+    infoText += " | Risk: $" + DoubleToString(InpRiskAmount, 0);
+    
+    // Check if today is a trading day
+    if(!IsTradingDay())
     {
-        infoText += " | TRADED";
+        infoText += " | ⏸️ PAUSED (Non-Trading Day)";
+    }
+    else
+    {
+        if(g_waitingForRetest)
+        {
+            string direction = g_isBullishBreakout ? "BULLISH" : "BEARISH";
+            infoText += " | ⏳ WAITING RETEST (" + direction + " " + IntegerToString(g_barsAfterBreakout) + "/" + IntegerToString(InpRetestBars) + ")";
+        }
+        else if(g_rangeSet)
+        {
+            infoText += " | H: " + DoubleToString(g_rangeHigh, _Digits) + " L: " + DoubleToString(g_rangeLow, _Digits);
+        }
+        
+        if(g_tradeToday)
+        {
+            infoText += " | TRADED";
+        }
     }
     
     ObjectSetString(0, OBJ_INFO_BOX, OBJPROP_TEXT, infoText);
