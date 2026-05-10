@@ -30,6 +30,20 @@ enum ENUM_BREAKOUT_MODE
 };
 
 //+------------------------------------------------------------------+
+//| Color Palette Selection                                           |
+//+------------------------------------------------------------------+
+enum ENUM_COLOR_PALETTE
+{
+   PALETTE_ONYX,        // Onyx
+   PALETTE_NIGHT,       // Night
+   PALETTE_ARCTIC,      // Arctic
+   PALETTE_SMC,         // SMC
+   PALETTE_LAVENDER,    // Lavender
+   PALETTE_CLAUDE,      // Claude
+   PALETTE_DEFAULT      // Default
+};
+
+//+------------------------------------------------------------------+
 //| Input Parameters                                                 |
 //+------------------------------------------------------------------+
 input group "=== Trading Settings ==="
@@ -61,6 +75,12 @@ input int InpCloseMinute = 0;                      // Trading Close Minute (0-59
 input group "=== Chart Settings ==="
 input bool InpShowLines = true;                    // Show High/Low Lines
 input bool InpConfigureChart = true;               // Configure Chart Colors
+
+
+input group "=== Chart Settings ==="
+input bool InpShowLines = true;                    // Show High/Low Lines
+input bool InpConfigureChart = true;               // Configure Chart Colors
+input ENUM_COLOR_PALETTE InpColorPalette = PALETTE_DEFAULT;  // Color Palette
 input double InpRiskPercent = 1.0;                 // Risk Per Trade (%)
 
 //+------------------------------------------------------------------+
@@ -247,27 +267,97 @@ void OnTrade()
 }
 
 //+------------------------------------------------------------------+
-//| Configure chart colors — soft, eye-pleasant palette             |
+//| Configure chart colors based on selected palette                 |
 //+------------------------------------------------------------------+
 void ConfigureChartColors()
 {
+   color bgColor, bullColor, bearColor, fgColor, gridColor, volColor, lineColor;
+   
+   switch(InpColorPalette)
+   {
+      case PALETTE_ONYX:
+         bgColor   = C'18,18,18';       // #121212
+         bullColor = C'200,184,154';    // #c8b89a
+         bearColor = C'122,115,104';    // #7a7368
+         fgColor   = C'160,155,148';
+         gridColor = C'28,28,28';
+         volColor  = C'50,48,44';
+         lineColor = C'200,184,154';
+         break;
+         
+      case PALETTE_NIGHT:
+         bgColor   = C'11,18,32';       // #0b1220
+         bullColor = C'199,226,247';    // #c7e2f7
+         bearColor = C'90,100,114';     // #5a6472
+         fgColor   = C'120,140,165';
+         gridColor = C'18,26,44';
+         volColor  = C'30,40,60';
+         lineColor = C'100,160,220';
+         break;
+         
+      case PALETTE_ARCTIC:
+         bgColor   = C'241,246,251';    // #f1f6fb
+         bullColor = C'255,255,255';    // #ffffff
+         bearColor = C'199,216,230';    // #c7d8e6
+         fgColor   = C'80,100,120';
+         gridColor = C'220,232,242';
+         volColor  = C'180,200,215';
+         lineColor = C'100,140,180';
+         break;
+         
+      case PALETTE_SMC:
+         bgColor   = C'243,241,236';    // #f3f1ec
+         bullColor = C'107,143,122';    // #6b8f7a
+         bearColor = C'47,42,37';       // #2f2a25
+         fgColor   = C'80,75,65';
+         gridColor = C'225,222,215';
+         volColor  = C'180,175,165';
+         lineColor = C'107,143,122';
+         break;
+         
+      case PALETTE_LAVENDER:
+         bgColor   = C'244,239,251';    // #f4effb
+         bullColor = C'255,255,255';    // #ffffff
+         bearColor = C'122,98,133';     // #7a6285
+         fgColor   = C'100,85,115';
+         gridColor = C'228,220,240';
+         volColor  = C'190,178,205';
+         lineColor = C'122,98,133';
+         break;
+         
+      case PALETTE_CLAUDE:
+         bgColor   = C'31,28,25';       // #1f1c19
+         bullColor = C'211,138,93';     // #d38a5d
+         bearColor = C'126,122,117';    // #7e7a75
+         fgColor   = C'160,155,148';
+         gridColor = C'40,36,32';
+         volColor  = C'55,50,45';
+         lineColor = C'211,138,93';
+         break;
+         
+      default: // PALETTE_DEFAULT
+         bgColor   = C'18,22,30';
+         bullColor = C'72,199,142';
+         bearColor = C'220,95,95';
+         fgColor   = C'160,170,190';
+         gridColor = C'30,36,48';
+         volColor  = C'60,70,90';
+         lineColor = C'100,160,220';
+         break;
+   }
+   
    ChartSetInteger(0, CHART_SHOW_GRID, false);
-   
-   // Soft dark background
-   ChartSetInteger(0, CHART_COLOR_BACKGROUND, C'18,22,30');
-   ChartSetInteger(0, CHART_COLOR_FOREGROUND, C'160,170,190');
-   
-   // Bullish = soft teal/green, Bearish = soft dusty rose/red
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, C'72,199,142');   // Soft mint green
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, C'220,95,95');    // Soft rose red
-   ChartSetInteger(0, CHART_COLOR_CHART_UP,    C'72,199,142');
-   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  C'220,95,95');
-   
-   ChartSetInteger(0, CHART_COLOR_BID,    C'100,160,220');
-   ChartSetInteger(0, CHART_COLOR_ASK,    C'100,160,220');
-   ChartSetInteger(0, CHART_COLOR_LAST,   C'100,160,220');
-   ChartSetInteger(0, CHART_COLOR_VOLUME, C'60,70,90');
-   ChartSetInteger(0, CHART_COLOR_GRID,   C'30,36,48');
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND,  bgColor);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND,  fgColor);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, bullColor);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, bearColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP,    bullColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN,  bearColor);
+   ChartSetInteger(0, CHART_COLOR_BID,         lineColor);
+   ChartSetInteger(0, CHART_COLOR_ASK,         lineColor);
+   ChartSetInteger(0, CHART_COLOR_LAST,        lineColor);
+   ChartSetInteger(0, CHART_COLOR_VOLUME,      volColor);
+   ChartSetInteger(0, CHART_COLOR_GRID,        gridColor);
    
    ChartRedraw();
 }
@@ -379,30 +469,60 @@ double GetTodayProfit()
 }
 
 //+------------------------------------------------------------------+
+//| Calculate actual risk in account currency from SL + lot size     |
+//+------------------------------------------------------------------+
+double GetActualRiskAmount()
+{
+   double point        = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double tickSize     = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue    = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double pipInPoints  = GetPipInPoints();
+   
+   // SL distance in price terms
+   double slDistance   = InpStopLossPips * pipInPoints * point;
+   
+   // Ticks in SL distance
+   double ticksInSL    = (tickSize > 0) ? slDistance / tickSize : 0;
+   
+   // Risk per lot
+   double riskPerLot   = ticksInSL * tickValue;
+   
+   // Total risk
+   return riskPerLot * InpLotSize;
+}
+
+//+------------------------------------------------------------------+
 //| Update panel values                                              |
 //+------------------------------------------------------------------+
 void UpdatePanel()
 {
    double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskAmount = accountBalance * InpRiskPercent / 100.0;
-   double todayProfit = GetTodayProfit();
+   double actualRisk     = GetActualRiskAmount();
+   double riskPct        = (accountBalance > 0) ? (actualRisk / accountBalance) * 100.0 : 0.0;
+   double todayProfit    = GetTodayProfit();
    
-   // Risk row
-   string riskText = "Risk: " + DoubleToString(InpRiskPercent, 1) + "% = " + 
-                     DoubleToString(riskAmount, 2) + " " + AccountInfoString(ACCOUNT_CURRENCY);
+   // Risk row — actual SL-based risk
+   string riskText = "Risk: " + DoubleToString(actualRisk, 2) + " " +
+                     AccountInfoString(ACCOUNT_CURRENCY) +
+                     " (" + DoubleToString(riskPct, 2) + "%)";
    ObjectSetString(0, panelRisk, OBJPROP_TEXT, riskText);
-   ObjectSetInteger(0, panelRisk, OBJPROP_COLOR, C'160,170,190');
+   
+   // Color code: green if within target, red if over
+   if(riskPct <= InpRiskPercent)
+      ObjectSetInteger(0, panelRisk, OBJPROP_COLOR, C'72,199,142');
+   else
+      ObjectSetInteger(0, panelRisk, OBJPROP_COLOR, C'220,95,95');
    
    // Profit row
-   string profitText = "Today P&L: " + (todayProfit >= 0 ? "+" : "") + 
+   string profitText = "Today P&L: " + (todayProfit >= 0 ? "+" : "") +
                        DoubleToString(todayProfit, 2) + " " + AccountInfoString(ACCOUNT_CURRENCY);
    ObjectSetString(0, panelProfit, OBJPROP_TEXT, profitText);
    if(todayProfit > 0)
-      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'72,199,142');   // Green
+      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'72,199,142');
    else if(todayProfit < 0)
-      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'220,95,95');    // Red
+      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'220,95,95');
    else
-      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'160,170,190');  // Neutral
+      ObjectSetInteger(0, panelProfit, OBJPROP_COLOR, C'160,170,190');
    
    // Status row
    string statusText = "";
