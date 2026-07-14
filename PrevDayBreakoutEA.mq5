@@ -2,8 +2,8 @@
 //|                                          PrevDayBreakoutEA.mq5   |
 //|                        Previous Day High/Low Breakout EA         |
 //+------------------------------------------------------------------+
-#property copyright "Previous Day Breakout EA"
-#property version   "1.00"
+#property copyright "Breakout EA"
+#property version   "2"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -62,8 +62,8 @@ input int InpLondonEndMinute   = 0;                    // London Session End Min
 
 input group "=== Trailing Stop Settings ==="
 input ENUM_TSL_MODE InpTrailingMode     = TSL_OFF;     // Trailing Stop Mode
-input int           InpTrailingStart    = 10;          // Trailing Start (Pips)
-input int           InpTrailingDistance = 10;          // Trailing Distance (Pips)
+input int           InpTrailingStart    = 40;          // Trailing Start (Pips, measured from breakout level)
+input int           InpTrailingDistance = 15;          // Trailing Distance (Pips)
 input double        InpTrailingStep     = 0.5;         // Trailing Step (Pips)
 
 input group "=== Trading Hours ==="
@@ -842,7 +842,32 @@ double GetPipInPoints()
 }
 
 //+------------------------------------------------------------------+
+//| Resolve which structural breakout level a position was triggered |
+//| from, based on its order comment and direction. This is the      |
+//| level "where the original order was placed" — independent of    |
+//| entry slippage — used as the trailing-stop reference point.      |
+//+------------------------------------------------------------------+
+double GetReferenceLevel(const string comment, const ENUM_POSITION_TYPE posType)
+{
+   bool isDaily  = (StringFind(comment, "_Daily")  >= 0);
+   bool isLondon = (StringFind(comment, "_London") >= 0);
+
+   if(isDaily)
+      return (posType == POSITION_TYPE_BUY) ? prevDayHigh : prevDayLow;
+
+   if(isLondon)
+      return (posType == POSITION_TYPE_BUY) ? londonHigh : londonLow;
+
+   return 0.0; // Unknown origin - caller falls back to PriceOpen()
+}
+
+//+------------------------------------------------------------------+
 //| Manage trailing stops                                            |
+//| Trailing-start profit is now measured from the structural        |
+//| breakout level (prevDayHigh/Low or londonHigh/Low), NOT from     |
+//| position.PriceOpen(). This removes the effect of entry slippage  |
+//| on when trailing kicks in, so a 40-pip slip on the fill no       |
+//| longer shifts the trailing trigger and distorts your edge.       |
 //+------------------------------------------------------------------+
 void ManageTrailingStops()
 {
@@ -866,10 +891,10 @@ void ManageTrailingStops()
             if(isLikelyBuy && !isLikelySell)       posType = POSITION_TYPE_BUY;
             else if(isLikelySell && !isLikelyBuy)  posType = POSITION_TYPE_SELL;
             else                                    posType = reportedType;
-
+            double referenceLevel = GetReferenceLevel(position.Comment(), posType);
             double priceDifference = (posType == POSITION_TYPE_BUY)
-                                     ? bidPrice - openPrice
-                                     : openPrice - bidPrice;
+                                     ? bidPrice - referenceLevel
+                                     : referenceLevel - bidPrice;
             double profitPips = priceDifference / pipValue;
 
             if(profitPips >= InpTrailingStart)
